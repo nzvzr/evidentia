@@ -32,7 +32,7 @@ export default function RunningPage() {
         if (next >= AGENTS.length) {
           if (timer.current) clearInterval(timer.current);
           setRunDone(true);
-          setTimeout(() => router.push("/report"), 900);
+          setTimeout(() => router.push("/reports/current"), 900);
           return AGENTS.length;
         }
         return next;

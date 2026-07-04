@@ -20,9 +20,13 @@ export default function PlaybooksPage() {
     setHydrated(true);
   }, []);
 
-  const open = (rec: PlaybookRecord, route: "/report" | "/playbook") => {
+  const openReport = (rec: PlaybookRecord) => {
     writeSelection(rec.selection);
-    router.push(route);
+    router.push(`/reports/${rec.id}`);
+  };
+  const openPrint = (rec: PlaybookRecord) => {
+    writeSelection(rec.selection);
+    window.open(`/playbook/${rec.id}/print`, "_blank");
   };
 
   const recents: PlaybookRecord[] = lastReport
@@ -93,8 +97,8 @@ export default function PlaybooksPage() {
                 </div>
 
                 <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-                  <button onClick={() => open(rec, "/report")} style={ghostBtn}>View report</button>
-                  <button onClick={() => open(rec, "/playbook")} style={darkBtn}>Export PDF</button>
+                  <button onClick={() => openReport(rec)} style={ghostBtn}>View report</button>
+                  <button onClick={() => openPrint(rec)} style={darkBtn}>Export PDF</button>
                 </div>
               </div>
             );

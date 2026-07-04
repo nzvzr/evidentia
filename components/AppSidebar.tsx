@@ -43,15 +43,15 @@ const DARK: Palette = {
 
 const NAV: { key: SidebarKey; label: string; letter: string; href: string }[] = [
   { key: "workspace", label: "Workspace", letter: "W", href: "/workspace" },
-  { key: "reports", label: "Reports", letter: "R", href: "/report" },
+  { key: "reports", label: "Reports", letter: "R", href: "/reports" },
   { key: "playbooks", label: "Playbooks", letter: "P", href: "/playbooks" },
   { key: "documents", label: "Documents", letter: "D", href: "/documents" },
 ];
 
-const RECENTS = [
-  "Northreach Cloud · EMEA",
-  "Sales Engineer Playbook",
-  "Solutions Architect Report",
+const RECENTS: { label: string; href: string }[] = [
+  { label: "Support Agent · EMEA", href: "/reports/support-emea" },
+  { label: "Sales Engineer Playbook", href: "/reports/sales-finserv" },
+  { label: "Solutions Architect Report", href: "/reports/architect-govcloud" },
 ];
 
 export default function AppSidebar({
@@ -175,8 +175,8 @@ export default function AppSidebar({
       <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
         {RECENTS.map((r) => (
           <button
-            key={r}
-            onClick={() => router.push("/report")}
+            key={r.href}
+            onClick={() => router.push(r.href)}
             style={{
               display: "flex",
               alignItems: "center",
@@ -208,7 +208,7 @@ export default function AppSidebar({
                 textOverflow: "ellipsis",
               }}
             >
-              {r}
+              {r.label}
             </span>
           </button>
         ))}
