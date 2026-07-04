@@ -8,6 +8,33 @@ Built for the **RAISE Summit Hackathon**.
 
 ---
 
+## Getting Started
+
+This repository contains the Evidentia frontend MVP built with **Next.js (App Router)**, **TypeScript**, and **Tailwind CSS**. It runs entirely on deterministic demo data — no auth provider, database, or external API is required.
+
+```bash
+npm install
+npm run dev
+```
+
+Then open [http://localhost:3000](http://localhost:3000) and walk the demo flow:
+
+1. `/` — landing page (nav links smooth-scroll to Product / Security / Docs / Pricing; "Sign in" opens the mock auth modal).
+2. `/workspace` — select documents, a market, and a persona (or describe a custom role), then **Run workflow**.
+3. `/running` — the visible 7-agent pipeline animates, then auto-redirects to the report.
+4. `/report` — the persona-aware dashboard. Click **Export playbook (PDF)**.
+5. `/playbook` — a dedicated 6-page A4 export preview. Click **Print / Save PDF** (uses `window.print()`).
+
+Production build:
+
+```bash
+npm run build
+```
+
+Your workspace selection persists in `localStorage`, so the report and playbook adapt to whatever persona/market/documents you chose on `/workspace`.
+
+---
+
 ## Problem
 
 Enterprise documentation is everywhere:
