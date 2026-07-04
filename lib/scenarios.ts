@@ -1,60 +1,71 @@
 import type { PlaybookRecord } from "./types";
 
 /**
- * Deterministic demo playbooks shown in the Playbooks library.
- * Each carries a workspace selection so "View report" / "Export PDF"
- * can re-hydrate the report and playbook pages.
+ * Deterministic demo reports shown in the Reports and Playbooks libraries.
+ * Each carries a workspace selection so opening a report/playbook can
+ * re-hydrate the report and print pages without a database.
  */
-export const PLAYBOOK_SCENARIOS: PlaybookRecord[] = [
+export const DEMO_REPORTS: PlaybookRecord[] = [
   {
-    id: "sc-sales-emea",
-    title: "Sales Engineer · EMEA",
+    id: "support-emea",
+    title: "Support Agent · EMEA",
     company: "Northreach Cloud",
-    persona: "Sales Engineer",
+    persona: "Support Agent",
     market: "EMEA",
     generatedDate: "Jul 04 2026",
+    confidence: 89,
+    risks: 4,
+    citations: 11,
+    documents: 3,
+    exportStatus: "Ready",
+    templateType: "Support escalation playbook",
+    category: "Support",
+    selection: { picked: ["d6", "d3", "d4"], market: "EMEA", persona: "support", custom: "" },
+  },
+  {
+    id: "sales-finserv",
+    title: "Sales Engineer · Financial Services",
+    company: "Northreach Cloud",
+    persona: "Sales Engineer",
+    market: "Financial Services",
+    generatedDate: "Jul 03 2026",
     confidence: 92,
     risks: 4,
     citations: 14,
+    documents: 4,
     exportStatus: "Exported",
     templateType: "Sales enablement playbook",
-    selection: { picked: ["d1", "d3", "d5", "d2"], market: "EMEA", persona: "sales", custom: "" },
-  },
-  {
-    id: "sc-compliance-health",
-    title: "Compliance Officer · Healthcare",
-    company: "Northreach Cloud",
-    persona: "Compliance Officer",
-    market: "Healthcare",
-    generatedDate: "Jul 03 2026",
-    confidence: 90,
-    risks: 4,
-    citations: 11,
-    exportStatus: "Ready",
-    templateType: "Compliance review playbook",
-    selection: { picked: ["d5", "d1", "d3"], market: "Healthcare", persona: "compliance", custom: "" },
-  },
-  {
-    id: "sc-support-finserv",
-    title: "Support Agent · Financial Services",
-    company: "Northreach Cloud",
-    persona: "Support Agent",
-    market: "Financial Services",
-    generatedDate: "Jul 02 2026",
-    confidence: 88,
-    risks: 4,
-    citations: 11,
-    exportStatus: "Ready",
-    templateType: "Support escalation playbook",
+    category: "Sales",
     selection: {
-      picked: ["d6", "d3", "d4"],
+      picked: ["d1", "d3", "d5", "d2"],
       market: "Financial Services",
-      persona: "support",
+      persona: "sales",
       custom: "",
     },
   },
   {
-    id: "sc-architect-govcloud",
+    id: "compliance-healthcare",
+    title: "Compliance Officer · Healthcare",
+    company: "Northreach Cloud",
+    persona: "Compliance Officer",
+    market: "Healthcare",
+    generatedDate: "Jul 02 2026",
+    confidence: 90,
+    risks: 4,
+    citations: 11,
+    documents: 3,
+    exportStatus: "Ready",
+    templateType: "Compliance review playbook",
+    category: "Compliance",
+    selection: {
+      picked: ["d5", "d1", "d3"],
+      market: "Healthcare",
+      persona: "compliance",
+      custom: "",
+    },
+  },
+  {
+    id: "architect-govcloud",
     title: "Solutions Architect · GovCloud",
     company: "Northreach Cloud",
     persona: "Solutions Architect",
@@ -63,8 +74,10 @@ export const PLAYBOOK_SCENARIOS: PlaybookRecord[] = [
     confidence: 93,
     risks: 4,
     citations: 11,
+    documents: 3,
     exportStatus: "Exported",
     templateType: "Architecture validation playbook",
+    category: "Architecture",
     selection: {
       picked: ["d4", "d2", "d5"],
       market: "Public Sector (GovCloud)",
@@ -73,7 +86,7 @@ export const PLAYBOOK_SCENARIOS: PlaybookRecord[] = [
     },
   },
   {
-    id: "sc-field-manufacturing",
+    id: "field-manufacturing",
     title: "Field Technician · Manufacturing",
     company: "Northreach Cloud",
     persona: "Field Technician",
@@ -82,8 +95,10 @@ export const PLAYBOOK_SCENARIOS: PlaybookRecord[] = [
     confidence: 86,
     risks: 4,
     citations: 11,
+    documents: 3,
     exportStatus: "Ready",
     templateType: "Field operations playbook",
+    category: "Operations",
     selection: {
       picked: ["d6", "d4", "d8"],
       market: "Manufacturing",
@@ -92,6 +107,22 @@ export const PLAYBOOK_SCENARIOS: PlaybookRecord[] = [
     },
   },
 ];
+
+/** Back-compat alias. */
+export const PLAYBOOK_SCENARIOS = DEMO_REPORTS;
+
+export function getReportById(id: string): PlaybookRecord | undefined {
+  return DEMO_REPORTS.find((r) => r.id === id);
+}
+
+export const REPORT_CATEGORIES = [
+  "All",
+  "Support",
+  "Sales",
+  "Compliance",
+  "Operations",
+  "Architecture",
+] as const;
 
 export interface PlaybookTemplate {
   id: string;

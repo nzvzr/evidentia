@@ -61,8 +61,11 @@ export interface PlaybookRecord {
   confidence: number;
   risks: number;
   citations: number;
+  documents: number;
   exportStatus: string;
   templateType: string;
+  /** filter category: Support | Sales | Compliance | Operations | Architecture */
+  category: string;
   /** workspace selection to re-hydrate report/playbook when opened */
   selection: WorkspaceSelection;
 }

@@ -126,6 +126,28 @@ html {
   flex-direction: column;
 }
 
+/* dedicated print route (/playbook/[id]/print) */
+.print-shell {
+  background: #d7d7d3;
+  padding: 26px 0 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+}
+
+.print-page {
+  width: 210mm;
+  min-height: 297mm;
+  background: #fff;
+  color: #0b0b0c;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.14);
+  padding: 16mm;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .print-only {
   display: none !important;
 }
@@ -149,13 +171,20 @@ html {
   html,
   body {
     background: white !important;
+    color: black !important;
     margin: 0 !important;
     padding: 0 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  .no-print {
+  .no-print,
+  button,
+  nav,
+  aside,
+  .sidebar,
+  .topbar,
+  .web-only {
     display: none !important;
   }
 
@@ -163,18 +192,20 @@ html {
     display: block !important;
   }
 
+  .print-shell,
   .playbook-preview {
     background: white !important;
     padding: 0 !important;
     gap: 0 !important;
   }
 
+  .print-page,
   .playbook-page {
     width: 210mm !important;
     height: 297mm !important;
     min-height: 297mm !important;
     margin: 0 auto !important;
-    padding: 18mm !important;
+    padding: 16mm !important;
     box-shadow: none !important;
     border: none !important;
     page-break-after: always;
@@ -182,6 +213,7 @@ html {
     overflow: hidden;
   }
 
+  .print-page:last-child,
   .playbook-page:last-child {
     page-break-after: auto;
     break-after: auto;

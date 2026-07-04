@@ -30,7 +30,7 @@ export function recordFromReport(
   selection: WorkspaceSelection,
 ): PlaybookRecord {
   return {
-    id: "last-report",
+    id: "current",
     title: `${report.personaTitle} · ${report.marketLabel}`,
     company: report.company,
     persona: report.personaTitle,
@@ -39,8 +39,10 @@ export function recordFromReport(
     confidence: report.confidence,
     risks: 4,
     citations: report.nCitations,
+    documents: report.nDocs,
     exportStatus: "Ready",
     templateType: "Custom run",
+    category: "All",
     selection,
   };
 }
