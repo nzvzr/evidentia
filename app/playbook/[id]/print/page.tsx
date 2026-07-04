@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Logo from "@/components/Logo";
 import {
@@ -14,23 +14,40 @@ import {
   severityCounts,
 } from "@/lib/demoReport";
 import type { DerivedReport, PlaybookInsights } from "@/lib/demoReport";
-import type { Severity } from "@/lib/types";
+import type { Severity, WorkspaceSelection } from "@/lib/types";
+import { getReportById } from "@/lib/scenarios";
 import { DEFAULT_SELECTION, readSelection } from "@/lib/useWorkspace";
 
 const mono = "var(--font-plex-mono), monospace";
 const TOTAL_PAGES = 6;
 
-export default function PlaybookPage() {
+/** Deterministic selection for first render (no localStorage → no hydration mismatch). */
+function staticSelectionForId(id: string): WorkspaceSelection {
+  if (id === "current") return DEFAULT_SELECTION;
+  return getReportById(id)?.selection ?? DEFAULT_SELECTION;
+}
+
+/** Resolved selection incl. localStorage — used after mount. */
+function selectionForId(id: string): WorkspaceSelection {
+  if (id === "current") return readSelection();
+  return getReportById(id)?.selection ?? readSelection();
+}
+
+export default function PrintPlaybookPage() {
   const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
+
   const [report, setReport] = useState<DerivedReport>(() =>
-    deriveReport(DEFAULT_SELECTION, DEFAULT_COMPANY),
+    deriveReport(staticSelectionForId(id), DEFAULT_COMPANY),
   );
-  const [insights, setInsights] = useState<PlaybookInsights>(() =>
-    derivePlaybookInsights(DEFAULT_SELECTION, deriveReport(DEFAULT_SELECTION, DEFAULT_COMPANY)),
-  );
+  const [insights, setInsights] = useState<PlaybookInsights>(() => {
+    const s = staticSelectionForId(id);
+    return derivePlaybookInsights(s, deriveReport(s, DEFAULT_COMPANY));
+  });
 
   useEffect(() => {
-    const sel = readSelection();
+    const sel = selectionForId(id);
     const r = deriveReport(sel, DEFAULT_COMPANY);
     setReport(r);
     setInsights(derivePlaybookInsights(sel, r));
@@ -39,7 +56,7 @@ export default function PlaybookPage() {
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [id]);
 
   const persona = report.persona;
   const counts = severityCounts();
@@ -49,24 +66,24 @@ export default function PlaybookPage() {
     <div style={{ minHeight: "100vh", background: "#d7d7d3" }}>
       {/* toolbar (hidden on print) */}
       <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px", height: 56, background: "var(--paper)", borderBottom: "1px solid var(--line)" }}>
-        <button onClick={() => router.push("/report")} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "var(--ink)", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+        <button onClick={() => router.push(`/reports/${id}`)} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "var(--ink)", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
           ← Back to report
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>EXPORT PREVIEW · 6-PAGE REPORT</span>
           <button onClick={() => window.print()} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "#fff", background: "#0a0a0b", border: "none", padding: "9px 16px", borderRadius: 8, cursor: "pointer" }}>
-            Print / Save PDF
+            Print / Save as PDF
           </button>
         </div>
       </div>
 
-      <div className="playbook-preview">
-        {/* ===== PAGE 1 · EXECUTIVE BRIEF ===== */}
-        <section className="playbook-page">
+      <div className="print-shell">
+        {/* ===== PAGE 1 · COVER / EXECUTIVE SUMMARY ===== */}
+        <section className="print-page">
           <div className="page-content">
             <PageHeader confidential report={report} showMeta={false} />
             <div style={{ marginTop: 44 }}>
-              <div style={{ fontFamily: mono, fontSize: 11, color: "var(--accent)", letterSpacing: ".16em", textTransform: "uppercase" }}>Executive Playbook</div>
+              <div style={{ fontFamily: mono, fontSize: 11, color: "var(--accent)", letterSpacing: ".16em", textTransform: "uppercase" }}>Persona Playbook</div>
               <h1 style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-.03em", lineHeight: 1, margin: "14px 0 0" }}>{report.personaTitle}</h1>
               <div style={{ fontSize: 15, color: "var(--sub)", marginTop: 12 }}>{report.company} — {report.marketLabel} market</div>
             </div>
@@ -85,9 +102,6 @@ export default function PlaybookPage() {
             <div style={{ marginTop: 36 }}>
               <SectionTitle>01 · EXECUTIVE SUMMARY</SectionTitle>
               <p style={{ fontSize: 14.5, lineHeight: 1.7, color: "var(--ink2)", margin: 0 }}>{report.execSummary}</p>
-              <p style={{ fontSize: 14.5, lineHeight: 1.7, color: "var(--ink2)", margin: "12px 0 0" }}>
-                Prioritize the recommended workflow on page three and resolve the highest-severity items in the risk register before committing to {report.marketLabel} timelines. Every recommendation in this document is traceable to a source span in the appendix, so this brief can be reviewed and defended in a security or compliance review.
-              </p>
             </div>
 
             <div style={{ marginTop: 22, padding: "16px 18px", border: "1px solid var(--line2)", borderRadius: 9, background: "var(--accent-weak)" }}>
@@ -109,33 +123,27 @@ export default function PlaybookPage() {
               ))}
             </div>
 
-            <div style={{ marginTop: 32 }}>
-              <SectionTitle>03 · KEY RISKS SNAPSHOT</SectionTitle>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {RISKS.map((r) => (
-                  <div key={r.title} className="avoid-break" style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "13px 15px", border: "1px solid var(--line2)", borderRadius: 8 }}>
-                    <SevBadge sev={r.sev} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)", lineHeight: 1.35 }}>{r.title}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--sub)", marginTop: 4, lineHeight: 1.45 }}>{r.impact}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
             <PageFooter report={report} page={1} />
           </div>
         </section>
 
         {/* ===== PAGE 2 · INSIGHT DASHBOARD ===== */}
-        <section className="playbook-page">
+        <section className="print-page">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
               <SectionTitle mb={22}>INSIGHT DASHBOARD</SectionTitle>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", border: "1px solid var(--line2)", borderRadius: 9, overflow: "hidden", marginBottom: 22 }}>
+                {report.metrics.map((m) => (
+                  <div key={m.k} style={{ padding: "14px 14px", borderRight: "1px solid var(--line)" }}>
+                    <div style={metaLabel}>{m.k.toUpperCase()}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, marginTop: 6, letterSpacing: "-.02em", color: m.accent ? "var(--accent)" : "var(--ink)" }}>{m.v}</div>
+                  </div>
+                ))}
+              </div>
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, gridAutoRows: "1fr" }}>
-                {/* document relevance */}
                 <InsightCard title="Document Relevance">
                   <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
                     {report.relevance.map((d) => (
@@ -150,7 +158,6 @@ export default function PlaybookPage() {
                   </div>
                 </InsightCard>
 
-                {/* risk severity */}
                 <InsightCard title="Risk Severity Breakdown">
                   <div style={{ height: 14, borderRadius: 4, overflow: "hidden", display: "flex" }}>
                     <div style={{ width: `${(counts.HIGH / totalRisks) * 100}%`, background: SEVERITY_COLORS.HIGH }} />
@@ -171,14 +178,10 @@ export default function PlaybookPage() {
                   </div>
                 </InsightCard>
 
-                {/* citation coverage */}
                 <StatCard title="Citation Coverage" big={insights.coverage.label} pct={insights.coverage.pct} sub={insights.coverage.sub} />
-                {/* workflow completeness */}
                 <StatCard title="Workflow Completeness" big={insights.workflow.label} pct={insights.workflow.pct} sub={insights.workflow.sub} />
-                {/* persona relevance */}
                 <StatCard title="Persona Relevance Score" big={insights.persona.label} pct={insights.persona.pct} sub={insights.persona.sub} />
 
-                {/* compliance sensitivity */}
                 <InsightCard title="Compliance Sensitivity">
                   <div style={{ fontSize: 30, fontWeight: 700, color: insights.compliance.color, letterSpacing: "-.02em" }}>{insights.compliance.label}</div>
                   <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
@@ -188,20 +191,6 @@ export default function PlaybookPage() {
                   </div>
                   <div style={{ fontSize: 12, color: "var(--sub)", marginTop: 14 }}>{insights.compliance.sub}</div>
                 </InsightCard>
-
-                {/* top evidence source */}
-                <InsightCard title="Top Evidence Source">
-                  <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "4px 8px", borderRadius: 5, alignSelf: "flex-start" }}>{insights.topEvidence.tag}</span>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", marginTop: 12 }}>{insights.topEvidence.doc}</div>
-                  <div style={{ fontSize: 12, color: "var(--sub)", marginTop: "auto", paddingTop: 16, lineHeight: 1.5 }}>The most-cited document driving this playbook&apos;s recommendations.</div>
-                </InsightCard>
-
-                {/* most important gap */}
-                <InsightCard title="Most Important Gap">
-                  <SevBadge sev="HIGH" />
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginTop: 12, lineHeight: 1.4 }}>{insights.topGap}</div>
-                  <div style={{ fontSize: 12, color: "var(--sub)", marginTop: "auto", paddingTop: 16, lineHeight: 1.5 }}>Resolve before {report.marketLabel} attestation.</div>
-                </InsightCard>
               </div>
             </div>
             <PageFooter report={report} page={2} />
@@ -209,7 +198,7 @@ export default function PlaybookPage() {
         </section>
 
         {/* ===== PAGE 3 · RECOMMENDED WORKFLOW ===== */}
-        <section className="playbook-page">
+        <section className="print-page">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -247,7 +236,7 @@ export default function PlaybookPage() {
         </section>
 
         {/* ===== PAGE 4 · RISK REGISTER & EVIDENCE ===== */}
-        <section className="playbook-page">
+        <section className="print-page">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -284,7 +273,7 @@ export default function PlaybookPage() {
         </section>
 
         {/* ===== PAGE 5 · SOURCE APPENDIX ===== */}
-        <section className="playbook-page">
+        <section className="print-page">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -309,7 +298,7 @@ export default function PlaybookPage() {
         </section>
 
         {/* ===== PAGE 6 · IMPLEMENTATION CHECKLIST ===== */}
-        <section className="playbook-page">
+        <section className="print-page">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -368,29 +357,10 @@ export default function PlaybookPage() {
 
 const RISK_COLS = "64px 1.1fr 1.3fr 62px 1.3fr 72px";
 
-const metaLabel: React.CSSProperties = {
-  fontFamily: mono,
-  fontSize: 9,
-  color: "var(--sub)",
-  letterSpacing: ".08em",
-};
+const metaLabel: React.CSSProperties = { fontFamily: mono, fontSize: 9, color: "var(--sub)", letterSpacing: ".08em" };
+const fieldLabel: React.CSSProperties = { fontFamily: mono, fontSize: 9.5, color: "var(--sub)", letterSpacing: ".08em" };
 
-const fieldLabel: React.CSSProperties = {
-  fontFamily: mono,
-  fontSize: 9.5,
-  color: "var(--sub)",
-  letterSpacing: ".08em",
-};
-
-function PageHeader({
-  report,
-  confidential = false,
-  showMeta = true,
-}: {
-  report: DerivedReport;
-  confidential?: boolean;
-  showMeta?: boolean;
-}) {
+function PageHeader({ report, confidential = false, showMeta = true }: { report: DerivedReport; confidential?: boolean; showMeta?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: 16, borderBottom: "1px solid var(--line)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

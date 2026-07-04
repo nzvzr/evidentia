@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import {
@@ -11,35 +11,53 @@ import {
   DEFAULT_COMPANY,
 } from "@/lib/demoReport";
 import type { DerivedReport } from "@/lib/demoReport";
+import { getReportById } from "@/lib/scenarios";
 import { DEFAULT_SELECTION, readSelection } from "@/lib/useWorkspace";
 import { recordFromReport, writeLastReport } from "@/lib/playbooksStore";
+import type { WorkspaceSelection } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
-export default function ReportPage() {
+/** Deterministic selection for first render (no localStorage → no hydration mismatch). */
+function staticSelectionForId(id: string): WorkspaceSelection {
+  if (id === "current") return DEFAULT_SELECTION;
+  return getReportById(id)?.selection ?? DEFAULT_SELECTION;
+}
+
+/** Resolved selection incl. localStorage — used after mount. */
+function selectionForId(id: string): WorkspaceSelection {
+  if (id === "current") return readSelection();
+  return getReportById(id)?.selection ?? readSelection();
+}
+
+export default function ReportDetailPage() {
   const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
+
   const [report, setReport] = useState<DerivedReport>(() =>
-    deriveReport(DEFAULT_SELECTION, DEFAULT_COMPANY),
+    deriveReport(staticSelectionForId(id), DEFAULT_COMPANY),
   );
   const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
-    const sel = readSelection();
+    const sel = selectionForId(id);
     const r = deriveReport(sel, DEFAULT_COMPANY);
     setReport(r);
-    writeLastReport(recordFromReport(r, sel));
+    if (id === "current") writeLastReport(recordFromReport(r, sel));
     const t = setTimeout(() => setChartReady(true), 160);
     return () => clearTimeout(t);
-  }, []);
+  }, [id]);
 
   const persona = report.persona;
+  const openPrint = () => window.open(`/playbook/${id}/print`, "_blank");
 
   return (
     <AppShell active="reports">
       {/* header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px", height: 60, background: "var(--paper)", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, zIndex: 5 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-          <span style={{ fontWeight: 700, fontSize: 14.5 }}>Report</span>
+          <button onClick={() => router.push("/reports")} style={{ background: "transparent", border: "none", cursor: "pointer", font: "inherit", fontWeight: 700, fontSize: 14.5, color: "var(--ink)" }}>Reports</button>
           <span style={{ color: "var(--line2)" }}>/</span>
           <span style={{ fontSize: 13.5, color: "var(--sub)" }}>{report.workspaceName}</span>
         </div>
@@ -47,7 +65,7 @@ export default function ReportPage() {
           <button onClick={() => router.push("/workspace")} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--line2)", padding: "8px 15px", borderRadius: 8, cursor: "pointer" }}>
             New report
           </button>
-          <button onClick={() => router.push("/playbook")} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "#fff", background: "#0a0a0b", border: "none", padding: "9px 16px", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={openPrint} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "#fff", background: "#0a0a0b", border: "none", padding: "9px 16px", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ width: 6, height: 6, borderRadius: 1, background: "var(--accent)" }} />
             Export playbook (PDF)
           </button>
@@ -93,7 +111,6 @@ export default function ReportPage() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 28, alignItems: "start" }} className="ev-report-grid">
           {/* LEFT */}
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-            {/* persona brief */}
             <Card>
               <SectionLabel>PERSONA BRIEF</SectionLabel>
               <p style={{ fontSize: 16, lineHeight: 1.62, color: "var(--ink2)", margin: 0 }}>{persona.brief}</p>
@@ -104,7 +121,6 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* workflow steps */}
             <Card>
               <SectionLabel>RECOMMENDED WORKFLOW</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -122,7 +138,6 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* risks */}
             <Card>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
                 <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>RISKS &amp; WARNINGS</span>
@@ -150,7 +165,6 @@ export default function ReportPage() {
 
           {/* RIGHT */}
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-            {/* agent timeline */}
             <Card pad="24px 24px">
               <SectionLabel>AGENT TIMELINE</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -164,7 +178,6 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* document relevance */}
             <Card pad="24px 24px">
               <SectionLabel>DOCUMENT RELEVANCE</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
@@ -182,7 +195,6 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* citations */}
             <Card pad="24px 24px">
               <SectionLabel>CITATIONS</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -198,7 +210,6 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* suggested actions */}
             <div style={{ background: "#0a0a0b", color: "#f5f5f3", borderRadius: 12, padding: "24px 24px" }}>
               <div style={{ fontFamily: mono, fontSize: 11, color: "rgba(245,245,243,.5)", letterSpacing: ".08em", marginBottom: 18 }}>SUGGESTED ACTIONS</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
@@ -212,7 +223,7 @@ export default function ReportPage() {
                   </div>
                 ))}
               </div>
-              <button onClick={() => router.push("/playbook")} style={{ width: "100%", marginTop: 18, fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: "#0a0a0b", background: "#fff", border: "none", padding: 12, borderRadius: 9, cursor: "pointer" }}>
+              <button onClick={openPrint} style={{ width: "100%", marginTop: 18, fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: "#0a0a0b", background: "#fff", border: "none", padding: 12, borderRadius: 9, cursor: "pointer" }}>
                 Export full playbook →
               </button>
             </div>
