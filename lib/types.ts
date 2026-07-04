@@ -17,6 +17,54 @@ export interface DemoDoc {
   description: string;
   /** base relevance score before persona boosts */
   base: number;
+  /** original filename */
+  filename: string;
+  /** functional category, e.g. "Security", "Compliance" */
+  category: string;
+  /** human page/endpoint/tab count, e.g. "48 pages" */
+  pages: string;
+  /** last-updated label */
+  updatedAt: string;
+  /** index status */
+  status: string;
+  /** citation anchor IDs contributed by this doc */
+  citationIds: string[];
+  /** persona titles that most rely on this doc */
+  usedByPersonas: string[];
+  /** topics covered */
+  topics: string[];
+  /** a representative excerpt */
+  sampleExcerpt: string;
+  /** short relevance tags */
+  relevanceTags: string[];
+}
+
+export interface UploadedDoc {
+  id: string;
+  name: string;
+  filename: string;
+  kind: string;
+  category: string;
+  sizeLabel: string;
+  uploadedAt: string;
+  excerpt: string;
+  status: string;
+}
+
+export interface PlaybookRecord {
+  id: string;
+  title: string;
+  company: string;
+  persona: string;
+  market: string;
+  generatedDate: string;
+  confidence: number;
+  risks: number;
+  citations: number;
+  exportStatus: string;
+  templateType: string;
+  /** workspace selection to re-hydrate report/playbook when opened */
+  selection: WorkspaceSelection;
 }
 
 export type Severity = "HIGH" | "MED" | "LOW";
