@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="{{ shellStyle }}">
+  <div style="display:flex;align-items:center;gap:10px;padding:6px 8px;cursor:pointer" onClick="{{ onLogo }}">
+    <div style="width:26px;height:26px;background:#0a0a0b;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative"><span style="font-weight:700;font-size:15px;color:#fff">e</span><span style="position:absolute;top:6px;right:5px;width:2.5px;height:2.5px;border-radius:50%;background:#fff"></span></div>
+    <span style="{{ wordmarkStyle }}">Evidentia</span>
+  </div>
+
+  <button onClick="{{ onNew }}" style="{{ newBtnStyle }}"><span style="font-size:15px;line-height:1;font-weight:400">+</span>New workspace</button>
+
+  <div style="{{ secLabelStyle }}">NAVIGATE</div>
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="4">
+      <div style="{{ n.rowStyle }}" onClick="{{ n.onClick }}"><div style="{{ n.tileStyle }}">{{ n.letter }}</div><span style="{{ n.labelStyle }}">{{ n.label }}</span></div>
+    </sc-for>
+  </div>
+
+  <div style="{{ secLabelStyle }}">RECENT</div>
+  <div style="display:flex;flex-direction:column;gap:1px">
+    <sc-for list="{{ recents }}" as="r" hint-placeholder-count="3">
+      <div style="{{ recentRowStyle }}" onClick="{{ r.onClick }}"><span style="{{ recentDotStyle }}"></span><span style="{{ recentLabelStyle }}">{{ r.label }}</span></div>
+    </sc-for>
+  </div>
+
+  <div style="flex:1;min-height:20px"></div>
+
+  <div style="{{ footStyle }}">
+    <sc-for list="{{ bottom }}" as="b" hint-placeholder-count="3">
+      <div style="{{ b.rowStyle }}" onClick="{{ b.onClick }}"><div style="{{ b.tileStyle }}">{{ b.letter }}</div><span style="{{ b.labelStyle }}">{{ b.label }}</span></div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:244,&quot;height&quot;:600},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;light&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;active&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;workspace&quot;,&quot;options&quot;:[&quot;workspace&quot;,&quot;reports&quot;,&quot;playbooks&quot;,&quot;documents&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;onLogo&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onNew&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onNav&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(id: string) =&gt; void&quot;},&quot;onOpenRecent&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onSettings&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onHelp&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onAccount&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;}}">
+class Component extends DCLogic {
+  renderVals(){
+    const dark = this.props.theme === 'dark';
+    const pal = dark
+      ? {bg:'#0d0d0f', border:'rgba(255,255,255,.08)', text:'#f4f4f2', sub:'rgba(244,244,242,.5)', tile:'rgba(255,255,255,.08)', activeBg:'rgba(47,86,224,.18)', activeText:'#ffffff'}
+      : {bg:'#ffffff', border:'rgba(15,15,20,.09)', text:'#0b0b0c', sub:'#77777c', tile:'#f1f1ee', activeBg:'rgba(47,86,224,.09)', activeText:'#2f56e0'};
+    const active = this.props.active || 'workspace';
+    const nav = this.props.onNav || (()=>{});
+
+    const mk = (id,label,letter)=>{
+      const on = id===active;
+      return {label, letter, onClick:()=>nav(id),
+        rowStyle:{display:'flex', alignItems:'center', gap:'11px', padding:'8px 10px', borderRadius:'8px', cursor:'pointer', background: on?pal.activeBg:'transparent'},
+        tileStyle:{width:'22px', height:'22px', flex:'none', borderRadius:'6px', display:'flex', alignItems:'center', justifyContent:'center',
+          fontFamily:"'IBM Plex Mono',monospace", fontSize:'10.5px', fontWeight:600,
+          background: on?'#2f56e0':pal.tile, color: on?'#fff':pal.sub},
+        labelStyle:{fontSize:'13.5px', fontWeight: on?600:500, color: on?pal.activeText:pal.text}};
+    };
+    const navItems = [mk('workspace','Workspace','W'), mk('reports','Reports','R'), mk('playbooks','Playbooks','P'), mk('documents','Documents','D')];
+
+    const openRecent = this.props.onOpenRecent || (()=>{});
+    const recents = ['Northreach Cloud · EMEA','Sales Engineer Playbook','Solutions Architect Report'].map(r=>({label:r, onClick:openRecent}));
+
+    const mkBottom = (label,letter,fn)=>({label, letter, onClick:fn||(()=>{}),
+      rowStyle:{display:'flex', alignItems:'center', gap:'11px', padding:'8px 10px', borderRadius:'8px', cursor:'pointer', background:'transparent'},
+      tileStyle:{width:'22px', height:'22px', flex:'none', borderRadius:'6px', display:'flex', alignItems:'center', justifyContent:'center',
+        fontFamily:"'IBM Plex Mono',monospace", fontSize:'10.5px', fontWeight:600, background:pal.tile, color:pal.sub},
+      labelStyle:{fontSize:'13.5px', fontWeight:500, color:pal.text}});
+    const bottom = [mkBottom('Settings','S',this.props.onSettings), mkBottom('Help','?',this.props.onHelp), mkBottom('Account','A',this.props.onAccount)];
+
+    return {
+      pal, navItems, recents, bottom,
+      onLogo: this.props.onLogo || (()=>{}),
+      onNew: this.props.onNew || (()=>{}),
+      shellStyle:{width:'244px', flex:'none', height:'100vh', position:'sticky', top:0, boxSizing:'border-box',
+        background:pal.bg, borderRight:'1px solid '+pal.border, display:'flex', flexDirection:'column', padding:'18px 14px', gap:'0'},
+      wordmarkStyle:{fontWeight:700, fontSize:'15px', color:pal.text},
+      newBtnStyle:{margin:'18px 0 6px', fontFamily:'inherit', fontSize:'13px', fontWeight:600, display:'flex', alignItems:'center', gap:'9px',
+        color:pal.text, background:pal.tile, border:'1px solid '+pal.border, borderRadius:'9px', padding:'10px 13px', cursor:'pointer'},
+      secLabelStyle:{fontFamily:"'IBM Plex Mono',monospace", fontSize:'9.5px', color:pal.sub, letterSpacing:'.12em', padding:'0 10px', margin:'20px 0 9px'},
+      recentRowStyle:{display:'flex', alignItems:'center', gap:'10px', padding:'7px 10px', borderRadius:'7px', cursor:'pointer'},
+      recentDotStyle:{width:'5px', height:'5px', borderRadius:'50%', flex:'none', background:pal.sub},
+      recentLabelStyle:{fontSize:'12.5px', color:pal.sub, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'},
+      footStyle:{display:'flex', flexDirection:'column', gap:'1px', paddingTop:'12px', borderTop:'1px solid '+pal.border},
+    };
+  }
+}
+</script>
+</body>
+</html>
