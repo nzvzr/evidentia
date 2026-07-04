@@ -12,6 +12,7 @@ import {
 } from "@/lib/demoReport";
 import type { DerivedReport } from "@/lib/demoReport";
 import { DEFAULT_SELECTION, readSelection } from "@/lib/useWorkspace";
+import { recordFromReport, writeLastReport } from "@/lib/playbooksStore";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -23,7 +24,10 @@ export default function ReportPage() {
   const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
-    setReport(deriveReport(readSelection(), DEFAULT_COMPANY));
+    const sel = readSelection();
+    const r = deriveReport(sel, DEFAULT_COMPANY);
+    setReport(r);
+    writeLastReport(recordFromReport(r, sel));
     const t = setTimeout(() => setChartReady(true), 160);
     return () => clearTimeout(t);
   }, []);

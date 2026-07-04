@@ -44,8 +44,8 @@ const DARK: Palette = {
 const NAV: { key: SidebarKey; label: string; letter: string; href: string }[] = [
   { key: "workspace", label: "Workspace", letter: "W", href: "/workspace" },
   { key: "reports", label: "Reports", letter: "R", href: "/report" },
-  { key: "playbooks", label: "Playbooks", letter: "P", href: "/playbook" },
-  { key: "documents", label: "Documents", letter: "D", href: "/workspace" },
+  { key: "playbooks", label: "Playbooks", letter: "P", href: "/playbooks" },
+  { key: "documents", label: "Documents", letter: "D", href: "/documents" },
 ];
 
 const RECENTS = [
