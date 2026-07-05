@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     evidentia_max_output_tokens: int = 700
     evidentia_enable_cache: bool = True
 
+    # --- persistence ---
+    database_url: str = ""
+    evidentia_db_enabled: bool = True
+    jwt_secret: str = "evidentia-dev-secret"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -51,6 +56,13 @@ class Settings(BaseSettings):
 
     def active_model(self):
         return self.evidentia_llm_model if self.effective_intensity() != "off" else None
+
+    def resolved_database_url(self) -> str:
+        """DATABASE_URL if set, else a local SQLite file for dev."""
+        return self.database_url or "sqlite:///./evidentia.db"
+
+    def is_db_enabled(self) -> bool:
+        return self.evidentia_db_enabled
 
 
 @lru_cache

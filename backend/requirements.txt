@@ -4,3 +4,8 @@ pydantic
 pydantic-settings
 python-dotenv
 openai
+sqlalchemy
+alembic
+psycopg2-binary
+passlib[bcrypt]
+python-jose[cryptography]

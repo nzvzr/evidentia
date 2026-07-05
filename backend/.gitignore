@@ -9,3 +9,7 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+
+# local databases
+*.db
+evidentia.db

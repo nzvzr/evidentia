@@ -12,8 +12,12 @@ TypeScript pipeline if the backend is unavailable.
 ## Endpoints
 
 - `GET /health` → `{ "status": "ok" }`
-- `GET /api/documents` → demo document metadata
-- `POST /api/generate-workflow` → an `EvidentiaReport`
+- `POST /api/generate-workflow` → an `EvidentiaReport` (persisted to the DB when enabled)
+- `GET /api/reports` · `GET /api/reports/{id}` · `POST /api/reports` · `DELETE /api/reports/{id}`
+- `GET /api/documents` · `POST /api/documents` (DB documents, else demo corpus)
+- `GET /api/personas` · `POST /api/personas` (company + default personas)
+- `GET /api/companies` · `POST /api/companies`
+- `POST /api/auth/register` · `POST /api/auth/token` (minimal)
 
 Request body:
 
@@ -44,6 +48,60 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
+```
+
+## Database
+
+The backend persists generated reports (and supports documents, personas,
+companies, users) via SQLAlchemy 2.x.
+
+- **SQLite (default, zero setup)** — if `DATABASE_URL` is empty, a local file
+  `backend/evidentia.db` is used. Tables are created automatically on startup.
+- **PostgreSQL** — set `DATABASE_URL` and run migrations:
+
+```bash
+# .env
+DATABASE_URL=postgresql://user:password@localhost:5432/evidentia
+EVIDENTIA_DB_ENABLED=true
+```
+
+Set `EVIDENTIA_DB_ENABLED=false` to disable persistence entirely (the API still
+generates and returns reports; the frontend falls back to localStorage).
+
+### Migrations (Alembic)
+
+```bash
+cd backend
+source .venv/bin/activate
+
+# create a new migration from model changes
+alembic revision --autogenerate -m "your message"
+
+# apply migrations
+alembic upgrade head
+
+# roll back one step
+alembic downgrade -1
+```
+
+The initial migration (`migrations/versions/*_initial_schema.py`) creates the
+`users`, `companies`, `company_members`, `documents`, `personas`, and `reports`
+tables. For SQLite dev, startup `create_all` also ensures the tables exist.
+
+### Test report persistence
+
+```bash
+# generate + save a report
+curl -s -X POST http://localhost:8000/api/generate-workflow \
+  -H "Content-Type: application/json" \
+  -d '{"market":"EMEA","persona":"Support Agent","selectedDocumentIds":["incident-response-runbook"]}' | python -m json.tool
+
+# list saved reports (auto-uses/creates the demo company)
+curl -s http://localhost:8000/api/reports | python -m json.tool
+
+# fetch one, then delete it
+curl -s http://localhost:8000/api/reports/<id>
+curl -s -X DELETE http://localhost:8000/api/reports/<id>
 ```
 
 ## Enable LLM mode (optional)
