@@ -3,31 +3,20 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import {
-  CITATIONS,
-  RISKS,
-  AGENTS,
-  deriveReport,
-  DEFAULT_COMPANY,
-} from "@/lib/demoReport";
-import type { DerivedReport } from "@/lib/demoReport";
-import { getReportById } from "@/lib/scenarios";
-import { DEFAULT_SELECTION, readSelection } from "@/lib/useWorkspace";
-import { recordFromReport, writeLastReport } from "@/lib/playbooksStore";
-import type { WorkspaceSelection } from "@/lib/types";
+import { generateReportForId } from "@/data/demoReports";
+import { resolveStoredReport } from "@/lib/reportsStore";
+import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
-/** Deterministic selection for first render (no localStorage → no hydration mismatch). */
-function staticSelectionForId(id: string): WorkspaceSelection {
-  if (id === "current") return DEFAULT_SELECTION;
-  return getReportById(id)?.selection ?? DEFAULT_SELECTION;
-}
-
-/** Resolved selection incl. localStorage — used after mount. */
-function selectionForId(id: string): WorkspaceSelection {
-  if (id === "current") return readSelection();
-  return getReportById(id)?.selection ?? readSelection();
+function formatStamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${mon} ${day} ${d.getUTCFullYear()} · ${hh}:${mm} UTC`;
 }
 
 export default function ReportDetailPage() {
@@ -35,22 +24,25 @@ export default function ReportDetailPage() {
   const params = useParams<{ id: string }>();
   const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
 
-  const [report, setReport] = useState<DerivedReport>(() =>
-    deriveReport(staticSelectionForId(id), DEFAULT_COMPANY),
-  );
+  const [report, setReport] = useState<EvidentiaReport>(() => generateReportForId(id));
   const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
-    const sel = selectionForId(id);
-    const r = deriveReport(sel, DEFAULT_COMPANY);
-    setReport(r);
-    if (id === "current") writeLastReport(recordFromReport(r, sel));
+    setReport(resolveStoredReport(id, generateReportForId));
     const t = setTimeout(() => setChartReady(true), 160);
     return () => clearTimeout(t);
   }, [id]);
 
-  const persona = report.persona;
-  const openPrint = () => window.open(`/playbook/${id}/print`, "_blank");
+  const { metrics, personaBrief } = report;
+  const openPrint = () => window.open(`/playbook/${report.id}/print`, "_blank");
+
+  const metricCards = [
+    { k: "Documents", v: String(metrics.documentsAnalyzed), s: "of 8 available", accent: false },
+    { k: "Passages indexed", v: metrics.passagesIndexed.toLocaleString(), s: "semantic chunks", accent: false },
+    { k: "Citations", v: String(metrics.citationsUsed), s: "source-traced", accent: false },
+    { k: "Risks flagged", v: String(metrics.risksFlagged), s: severityBreakdown(report), accent: false },
+    { k: "Confidence", v: `${report.confidence}%`, s: "grounding score", accent: true },
+  ];
 
   return (
     <AppShell active="reports">
@@ -59,7 +51,7 @@ export default function ReportDetailPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
           <button onClick={() => router.push("/reports")} style={{ background: "transparent", border: "none", cursor: "pointer", font: "inherit", fontWeight: 700, fontSize: 14.5, color: "var(--ink)" }}>Reports</button>
           <span style={{ color: "var(--line2)" }}>/</span>
-          <span style={{ fontSize: 13.5, color: "var(--sub)" }}>{report.workspaceName}</span>
+          <span style={{ fontSize: 13.5, color: "var(--sub)" }}>{report.company} · {report.market}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => router.push("/workspace")} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--line2)", padding: "8px 15px", borderRadius: 8, cursor: "pointer" }}>
@@ -77,19 +69,22 @@ export default function ReportDetailPage() {
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 26 }}>
           <div>
             <div style={{ fontFamily: mono, fontSize: 11.5, color: "var(--accent)", letterSpacing: ".1em", textTransform: "uppercase" }}>
-              Persona report · {report.marketLabel}
+              Persona report · {report.market}
             </div>
-            <h1 style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-.02em", margin: "8px 0 0" }}>{report.personaTitle}</h1>
+            <h1 style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-.02em", margin: "8px 0 0" }}>{report.persona}</h1>
+            {personaBrief.isCustom && (
+              <div style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", marginTop: 6 }}>CUSTOM ROLE</div>
+            )}
           </div>
           <div style={{ fontFamily: mono, fontSize: 11.5, color: "var(--sub)", textAlign: "right", lineHeight: 1.7 }}>
-            <div>GENERATED {report.genStamp}</div>
-            <div>7 AGENTS · {report.nDocs} DOCS · CONFIDENCE {report.confidence}%</div>
+            <div>GENERATED {formatStamp(report.generatedAt)}</div>
+            <div>7 AGENTS · {metrics.documentsAnalyzed} DOCS · CONFIDENCE {report.confidence}%</div>
           </div>
         </div>
 
         {/* metric cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 1, background: "var(--line)", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", marginBottom: 28 }} className="ev-metric-grid">
-          {report.metrics.map((m) => (
+          {metricCards.map((m) => (
             <div key={m.k} style={{ padding: "20px 20px", background: "var(--panel)" }}>
               <div style={{ fontFamily: mono, fontSize: 10.5, color: "var(--sub)", letterSpacing: ".06em", textTransform: "uppercase" }}>{m.k}</div>
               <div style={{ fontSize: 27, fontWeight: 700, letterSpacing: "-.02em", marginTop: 9, color: m.accent ? "var(--accent)" : "var(--ink)" }}>{m.v}</div>
@@ -104,7 +99,7 @@ export default function ReportDetailPage() {
             <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>EXECUTIVE SUMMARY</span>
             <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
           </div>
-          <p style={{ fontSize: 15, lineHeight: 1.62, color: "var(--ink2)", margin: 0 }}>{report.execSummary}</p>
+          <p style={{ fontSize: 15, lineHeight: 1.62, color: "var(--ink2)", margin: 0 }}>{report.summary}</p>
         </div>
 
         {/* two-column body */}
@@ -113,9 +108,9 @@ export default function ReportDetailPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
             <Card>
               <SectionLabel>PERSONA BRIEF</SectionLabel>
-              <p style={{ fontSize: 16, lineHeight: 1.62, color: "var(--ink2)", margin: 0 }}>{persona.brief}</p>
+              <p style={{ fontSize: 16, lineHeight: 1.62, color: "var(--ink2)", margin: 0 }}>{personaBrief.description}</p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 20 }}>
-                {persona.priorities.map((p) => (
+                {personaBrief.priorities.map((p) => (
                   <span key={p} style={{ fontFamily: mono, fontSize: 11, color: "var(--ink)", background: "var(--shell)", border: "1px solid var(--line)", padding: "6px 11px", borderRadius: 6 }}>{p}</span>
                 ))}
               </div>
@@ -124,15 +119,16 @@ export default function ReportDetailPage() {
             <Card>
               <SectionLabel>RECOMMENDED WORKFLOW</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {persona.steps.map((s, i) => (
-                  <div key={s.t} style={{ display: "flex", gap: 15, alignItems: "flex-start", padding: "15px 0", borderBottom: i < persona.steps.length - 1 ? "1px solid var(--line)" : "none" }}>
+                {report.workflowSteps.map((s, i) => (
+                  <div key={s.step} style={{ display: "flex", gap: 15, alignItems: "flex-start", padding: "15px 0", borderBottom: i < report.workflowSteps.length - 1 ? "1px solid var(--line)" : "none" }}>
                     <div style={{ width: 26, height: 26, flex: "none", borderRadius: "50%", border: "1px solid var(--line2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
-                      {String(i + 1).padStart(2, "0")}
+                      {String(s.step).padStart(2, "0")}
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)" }}>{s.t}</div>
-                      <div style={{ fontSize: 13, color: "var(--sub)", marginTop: 3, lineHeight: 1.5 }}>{s.d}</div>
+                      <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)" }}>{s.title}</div>
+                      <div style={{ fontSize: 13, color: "var(--sub)", marginTop: 3, lineHeight: 1.5 }}>{s.description}</div>
                     </div>
+                    <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, whiteSpace: "nowrap", alignSelf: "center" }}>{s.evidenceCode}</span>
                   </div>
                 ))}
               </div>
@@ -141,20 +137,20 @@ export default function ReportDetailPage() {
             <Card>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
                 <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>RISKS &amp; WARNINGS</span>
-                <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{RISKS.length} flagged</span>
+                <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{report.risks.length} flagged</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {RISKS.map((r) => {
-                  const high = r.sev === "HIGH";
+                {report.risks.map((r) => {
+                  const high = r.severity === "High";
                   return (
                     <div key={r.title} style={{ display: "flex", gap: 14, padding: "15px 16px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--shell)" }}>
                       <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".05em", padding: "4px 8px", borderRadius: 5, height: "fit-content", flex: "none", color: high ? "#fff" : "var(--ink)", background: high ? "var(--accent)" : "transparent", border: high ? "none" : "1px solid var(--line2)" }}>
-                        {r.sev}
+                        {r.severity.toUpperCase()}
                       </span>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{r.title}</div>
-                        <div style={{ fontSize: 13, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5 }}>{r.detail}</div>
-                        <div style={{ fontFamily: mono, fontSize: 11, color: "var(--accent)", marginTop: 7 }}>{r.src}</div>
+                        <div style={{ fontSize: 13, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5 }}>{r.description}</div>
+                        <div style={{ fontFamily: mono, fontSize: 11, color: "var(--accent)", marginTop: 7 }}>{r.evidenceCode} · {r.owner}</div>
                       </div>
                     </div>
                   );
@@ -168,11 +164,11 @@ export default function ReportDetailPage() {
             <Card pad="24px 24px">
               <SectionLabel>AGENT TIMELINE</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {AGENTS.map((t) => (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
+                {report.agentSteps.map((t) => (
+                  <div key={t.agent} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", flex: "none" }} />
-                    <span style={{ fontSize: 13, color: "var(--ink)", flex: 1 }}>{t.name}</span>
-                    <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{t.dur}</span>
+                    <span style={{ fontSize: 13, color: "var(--ink)", flex: 1 }}>{t.agent}</span>
+                    <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{t.duration}</span>
                   </div>
                 ))}
               </div>
@@ -181,14 +177,14 @@ export default function ReportDetailPage() {
             <Card pad="24px 24px">
               <SectionLabel>DOCUMENT RELEVANCE</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
-                {report.relevance.map((d) => (
-                  <div key={d.id}>
+                {metrics.documentRelevance.map((d) => (
+                  <div key={d.document}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 12.5, color: "var(--ink)" }}>{d.short}</span>
-                      <span style={{ fontFamily: mono, fontSize: 11.5, color: "var(--sub)" }}>{d.pct}%</span>
+                      <span style={{ fontSize: 12.5, color: "var(--ink)" }}>{d.document}</span>
+                      <span style={{ fontFamily: mono, fontSize: 11.5, color: "var(--sub)" }}>{d.score}%</span>
                     </div>
                     <div style={{ height: 7, background: "var(--shell)", borderRadius: 4, overflow: "hidden" }}>
-                      <div style={{ width: `${chartReady ? d.pct : 0}%`, height: "100%", background: d.pct >= 85 ? "var(--accent)" : "#0a0a0b", borderRadius: 4, transition: "width .8s cubic-bezier(.22,1,.36,1)" }} />
+                      <div style={{ width: `${chartReady ? d.score : 0}%`, height: "100%", background: d.score >= 85 ? "var(--accent)" : "#0a0a0b", borderRadius: 4, transition: "width .8s cubic-bezier(.22,1,.36,1)" }} />
                     </div>
                   </div>
                 ))}
@@ -198,12 +194,12 @@ export default function ReportDetailPage() {
             <Card pad="24px 24px">
               <SectionLabel>CITATIONS</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {CITATIONS.map((c, i) => (
-                  <div key={c.tag} style={{ display: "flex", gap: 12, padding: "13px 0", borderBottom: i < CITATIONS.length - 1 ? "1px solid var(--line)" : "none" }}>
-                    <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{c.tag}</span>
+                {report.citations.map((c, i) => (
+                  <div key={c.id + i} style={{ display: "flex", gap: 12, padding: "13px 0", borderBottom: i < report.citations.length - 1 ? "1px solid var(--line)" : "none" }}>
+                    <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{c.id}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{c.doc}</div>
-                      <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5, fontStyle: "italic" }}>&ldquo;{c.snippet}&rdquo;</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{c.source}</div>
+                      <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5, fontStyle: "italic" }}>&ldquo;{c.excerpt}&rdquo;</div>
                     </div>
                   </div>
                 ))}
@@ -213,7 +209,7 @@ export default function ReportDetailPage() {
             <div style={{ background: "#0a0a0b", color: "#f5f5f3", borderRadius: 12, padding: "24px 24px" }}>
               <div style={{ fontFamily: mono, fontSize: 11, color: "rgba(245,245,243,.5)", letterSpacing: ".08em", marginBottom: 18 }}>SUGGESTED ACTIONS</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-                {persona.actions.map((a) => (
+                {report.suggestedActions.map((a) => (
                   <div key={a.title} style={{ display: "flex", gap: 13, alignItems: "flex-start", padding: "13px 14px", border: "1px solid rgba(255,255,255,.12)", borderRadius: 9 }}>
                     <span style={{ color: "var(--accent)", fontFamily: mono, fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>→</span>
                     <div style={{ flex: 1 }}>
@@ -245,6 +241,13 @@ export default function ReportDetailPage() {
       `}</style>
     </AppShell>
   );
+}
+
+function severityBreakdown(report: EvidentiaReport): string {
+  const h = report.risks.filter((r) => r.severity === "High").length;
+  const m = report.risks.filter((r) => r.severity === "Medium").length;
+  const l = report.risks.filter((r) => r.severity === "Low").length;
+  return `${h} high · ${m} med · ${l} low`;
 }
 
 function Card({ children, pad = "26px 28px" }: { children: React.ReactNode; pad?: string }) {

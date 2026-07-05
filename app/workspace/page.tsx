@@ -7,6 +7,8 @@ import { MARKETS } from "@/lib/markets";
 import { PERSONAS } from "@/lib/personas";
 import type { DocId } from "@/lib/types";
 import { useWorkspaceSelection } from "@/lib/useWorkspace";
+import { buildAgentInput } from "@/lib/workspaceMapping";
+import { writePendingRun } from "@/lib/pendingRun";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -35,6 +37,7 @@ export default function WorkspacePage() {
   const startRun = () => {
     if (!canRun) return;
     setSelection(selection);
+    writePendingRun(buildAgentInput(selection));
     router.push("/running");
   };
 

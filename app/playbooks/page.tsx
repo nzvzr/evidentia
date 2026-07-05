@@ -1,38 +1,67 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { PLAYBOOK_SCENARIOS, PLAYBOOK_TEMPLATES } from "@/lib/scenarios";
-import { readLastReport } from "@/lib/playbooksStore";
-import type { PlaybookRecord } from "@/lib/types";
-import { writeSelection } from "@/lib/useWorkspace";
+import { PLAYBOOK_TEMPLATES } from "@/lib/scenarios";
+import { DEMO_REPORTS } from "@/data/demoReports";
+import { getReports } from "@/lib/reportsStore";
+import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
+interface PlaybookCard {
+  id: string;
+  title: string;
+  company: string;
+  persona: string;
+  market: string;
+  generatedDate: string;
+  confidence: number;
+  risks: number;
+  citations: number;
+  isLocal: boolean;
+}
+
+function toCard(r: EvidentiaReport, isLocal: boolean): PlaybookCard {
+  const d = new Date(r.generatedAt);
+  const date = Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric", timeZone: "UTC" });
+  return {
+    id: r.id,
+    title: `${r.persona} · ${r.market}`,
+    company: r.company,
+    persona: r.persona,
+    market: r.market,
+    generatedDate: date,
+    confidence: r.confidence,
+    risks: r.metrics.risksFlagged,
+    citations: r.metrics.citationsUsed,
+    isLocal,
+  };
+}
+
 export default function PlaybooksPage() {
   const router = useRouter();
-  const [lastReport, setLastReport] = useState<PlaybookRecord | null>(null);
+  const [stored, setStored] = useState<EvidentiaReport[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setLastReport(readLastReport());
+    setStored(getReports());
     setHydrated(true);
   }, []);
 
-  const openReport = (rec: PlaybookRecord) => {
-    writeSelection(rec.selection);
-    router.push(`/reports/${rec.id}`);
-  };
-  const openPrint = (rec: PlaybookRecord) => {
-    writeSelection(rec.selection);
-    window.open(`/playbook/${rec.id}/print`, "_blank");
-  };
+  const openReport = (rec: PlaybookCard) => router.push(`/reports/${rec.id}`);
+  const openPrint = (rec: PlaybookCard) => window.open(`/playbook/${rec.id}/print`, "_blank");
 
-  const recents: PlaybookRecord[] = lastReport
-    ? [lastReport, ...PLAYBOOK_SCENARIOS]
-    : PLAYBOOK_SCENARIOS;
-  const hasLocal = hydrated && !!lastReport;
+  const recents: PlaybookCard[] = useMemo(() => {
+    const localCards = stored.map((r) => toCard(r, true));
+    const localIds = new Set(localCards.map((c) => c.id));
+    const demoCards = DEMO_REPORTS.filter((r) => !localIds.has(r.id)).map((r) => toCard(r, false));
+    return [...localCards, ...demoCards];
+  }, [stored]);
+  const hasLocal = hydrated && stored.length > 0;
 
   return (
     <AppShell active="playbooks">
@@ -71,8 +100,7 @@ export default function PlaybooksPage() {
         {/* A. Recent playbooks */}
         <SectionLabel>RECENT PLAYBOOKS</SectionLabel>
         <div style={cardGrid} className="ev-pb-grid">
-          {recents.map((rec, i) => {
-            const isLocal = hasLocal && i === 0;
+          {recents.map((rec) => {
             return (
               <div key={rec.id} style={playbookCard}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
@@ -80,7 +108,7 @@ export default function PlaybooksPage() {
                     <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-.01em" }}>{rec.title}</div>
                     <div style={{ fontSize: 12.5, color: "var(--sub)", marginTop: 4 }}>{rec.company}</div>
                   </div>
-                  <StatusPill label={isLocal ? "This session" : rec.exportStatus} accent={isLocal} />
+                  <StatusPill label={rec.isLocal ? "This session" : "Ready"} accent={rec.isLocal} />
                 </div>
 
                 <div style={metaGrid}>

@@ -3,37 +3,77 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { DEMO_REPORTS, REPORT_CATEGORIES } from "@/lib/scenarios";
-import { readLastReport } from "@/lib/playbooksStore";
-import type { PlaybookRecord } from "@/lib/types";
+import { DEMO_REPORTS } from "@/data/demoReports";
+import { REPORT_CATEGORIES } from "@/lib/scenarios";
+import { getReports } from "@/lib/reportsStore";
+import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
+interface Card {
+  id: string;
+  title: string;
+  company: string;
+  persona: string;
+  market: string;
+  generatedDate: string;
+  confidence: number;
+  documents: number;
+  citations: number;
+  risks: number;
+  status: string;
+  category: string;
+  isLocal: boolean;
+}
+
+function toCard(r: EvidentiaReport, isLocal: boolean): Card {
+  const d = new Date(r.generatedAt);
+  const date = Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric", timeZone: "UTC" });
+  return {
+    id: r.id,
+    title: `${r.persona} · ${r.market}`,
+    company: r.company,
+    persona: r.persona,
+    market: r.market,
+    generatedDate: date,
+    confidence: r.confidence,
+    documents: r.metrics.documentsAnalyzed,
+    citations: r.metrics.citationsUsed,
+    risks: r.metrics.risksFlagged,
+    status: isLocal ? "This session" : "Ready",
+    category: r.category,
+    isLocal,
+  };
+}
+
 export default function ReportsPage() {
   const router = useRouter();
-  const [lastReport, setLastReport] = useState<PlaybookRecord | null>(null);
+  const [stored, setStored] = useState<EvidentiaReport[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("All");
 
   useEffect(() => {
-    setLastReport(readLastReport());
+    setStored(getReports());
   }, []);
 
-  const all: PlaybookRecord[] = useMemo(
-    () => (lastReport ? [lastReport, ...DEMO_REPORTS] : DEMO_REPORTS),
-    [lastReport],
-  );
+  const cards: Card[] = useMemo(() => {
+    const localCards = stored.map((r) => toCard(r, true));
+    const localIds = new Set(localCards.map((c) => c.id));
+    const demoCards = DEMO_REPORTS.filter((r) => !localIds.has(r.id)).map((r) => toCard(r, false));
+    return [...localCards, ...demoCards];
+  }, [stored]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return all.filter((r) => {
-      const inCat = category === "All" || r.category === category;
+    return cards.filter((c) => {
+      const inCat = category === "All" || c.category === category;
       const inQuery =
-        !q ||
-        [r.title, r.persona, r.market, r.company].some((f) => f.toLowerCase().includes(q));
+        !q || [c.title, c.persona, c.market, c.company].some((f) => f.toLowerCase().includes(q));
       return inCat && inQuery;
     });
-  }, [all, query, category]);
+  }, [cards, query, category]);
 
   return (
     <AppShell active="reports">
@@ -56,7 +96,6 @@ export default function ReportsPage() {
           </p>
         </div>
 
-        {/* search + filters */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 22 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {REPORT_CATEGORIES.map((c) => {
@@ -90,47 +129,43 @@ export default function ReportsPage() {
           />
         </div>
 
-        {/* cards */}
         {filtered.length === 0 ? (
           <div style={{ padding: "48px 0", textAlign: "center", color: "var(--sub)", fontSize: 14 }}>
             No reports match your search.
           </div>
         ) : (
           <div style={cardGrid} className="ev-rep-grid">
-            {filtered.map((rec, i) => {
-              const isLocal = lastReport && i === 0 && !!lastReport && rec.id === lastReport.id;
-              return (
-                <div key={rec.id + i} style={reportCard}>
-                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-                    <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-.01em" }}>{rec.title}</div>
-                      <div style={{ fontSize: 12.5, color: "var(--sub)", marginTop: 4 }}>{rec.company}</div>
-                    </div>
-                    <StatusPill label={isLocal ? "This session" : rec.exportStatus} accent={!!isLocal} />
+            {filtered.map((rec) => (
+              <div key={rec.id} style={reportCard}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-.01em" }}>{rec.title}</div>
+                    <div style={{ fontSize: 12.5, color: "var(--sub)", marginTop: 4 }}>{rec.company}</div>
                   </div>
-
-                  <div style={metaGrid}>
-                    <Meta label="PERSONA" value={rec.persona} />
-                    <Meta label="MARKET" value={rec.market} />
-                    <Meta label="GENERATED" value={rec.generatedDate} monoValue />
-                    <Meta label="CONFIDENCE" value={`${rec.confidence}%`} accent />
-                  </div>
-
-                  <div style={{ display: "flex", gap: 14, marginTop: 14, fontFamily: mono, fontSize: 11.5, color: "var(--sub)" }}>
-                    <span>{rec.documents} docs</span>
-                    <span>·</span>
-                    <span>{rec.citations} citations</span>
-                    <span>·</span>
-                    <span>{rec.risks} risks</span>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-                    <button onClick={() => router.push(`/reports/${rec.id}`)} style={ghostBtn}>View report</button>
-                    <button onClick={() => window.open(`/playbook/${rec.id}/print`, "_blank")} style={darkBtn}>Export playbook</button>
-                  </div>
+                  <StatusPill label={rec.status} accent={rec.isLocal} />
                 </div>
-              );
-            })}
+
+                <div style={metaGrid}>
+                  <Meta label="PERSONA" value={rec.persona} />
+                  <Meta label="MARKET" value={rec.market} />
+                  <Meta label="GENERATED" value={rec.generatedDate} monoValue />
+                  <Meta label="CONFIDENCE" value={`${rec.confidence}%`} accent />
+                </div>
+
+                <div style={{ display: "flex", gap: 14, marginTop: 14, fontFamily: mono, fontSize: 11.5, color: "var(--sub)" }}>
+                  <span>{rec.documents} docs</span>
+                  <span>·</span>
+                  <span>{rec.citations} citations</span>
+                  <span>·</span>
+                  <span>{rec.risks} risks</span>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+                  <button onClick={() => router.push(`/reports/${rec.id}`)} style={ghostBtn}>View report</button>
+                  <button onClick={() => window.open(`/playbook/${rec.id}/print`, "_blank")} style={darkBtn}>Export playbook</button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -4,8 +4,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { AGENTS } from "@/lib/demoReport";
-import { PERSONAS } from "@/lib/personas";
+import { runEvidentiaAgents } from "@/lib/agents/orchestrator";
+import { readPendingRun } from "@/lib/pendingRun";
+import { buildAgentInput } from "@/lib/workspaceMapping";
 import { readSelection } from "@/lib/useWorkspace";
+import { saveReport } from "@/lib/reportsStore";
+import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 const STAGE_MS = 850; // ~6s total across 7 agents + compile
@@ -18,13 +22,37 @@ export default function RunningPage() {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    const sel = readSelection();
-    const personaLabel = sel.persona
-      ? sel.persona === "custom"
-        ? sel.custom.trim() || "Custom Role"
-        : PERSONAS.find((p) => p.id === sel.persona)?.title ?? "Persona"
-      : sel.custom.trim() || "Persona";
-    setMeta({ personaLabel, marketLabel: sel.market || "Market" });
+    const input = readPendingRun() ?? buildAgentInput(readSelection());
+    const personaLabel = input.customPersona?.trim()
+      ? input.customPersona.trim()
+      : input.persona || "Persona";
+    setMeta({ personaLabel, marketLabel: input.market || "Market" });
+
+    let animationDone = false;
+    let report: EvidentiaReport | null = null;
+    let navigated = false;
+    const finish = () => {
+      if (navigated || !animationDone || !report) return;
+      navigated = true;
+      saveReport(report);
+      router.push(`/reports/${report.id}`);
+    };
+
+    // Generate the report: API first, deterministic local pipeline as fallback.
+    (async () => {
+      try {
+        const res = await fetch("/api/generate-workflow", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        report = (await res.json()) as EvidentiaReport;
+      } catch {
+        report = runEvidentiaAgents(input, { generatedAt: new Date().toISOString() });
+      }
+      finish();
+    })();
 
     timer.current = setInterval(() => {
       setRunIdx((prev) => {
@@ -32,7 +60,8 @@ export default function RunningPage() {
         if (next >= AGENTS.length) {
           if (timer.current) clearInterval(timer.current);
           setRunDone(true);
-          setTimeout(() => router.push("/reports/current"), 900);
+          animationDone = true;
+          setTimeout(finish, 400);
           return AGENTS.length;
         }
         return next;
