@@ -3,7 +3,7 @@ import { HIGH_COMPLIANCE_MARKETS } from "./markets";
 import { PERSONAS, buildCustomPersona, getPersonaById } from "./personas";
 import type {
   Agent,
-  Citation,
+  DemoCitation,
   DocId,
   Persona,
   Risk,
@@ -23,7 +23,7 @@ export const AGENTS: Agent[] = [
   { id: "playbook", name: "Playbook Composer", log: "Assembled exportable playbook", dur: "0.3s" },
 ];
 
-export const CITATIONS: Citation[] = [
+export const CITATIONS: DemoCitation[] = [
   {
     tag: "SEC-4.2",
     doc: "Security & Compliance Whitepaper · §4.2",

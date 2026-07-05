@@ -85,7 +85,8 @@ export interface Risk {
   owner: string;
 }
 
-export interface Citation {
+/** Legacy citation shape used by the static demoReport helpers. */
+export interface DemoCitation {
   tag: string;
   doc: string;
   snippet: string;
@@ -99,7 +100,8 @@ export interface Agent {
   dur: string;
 }
 
-export interface WorkflowStep {
+/** Legacy persona workflow step used by the static persona catalogue. */
+export interface PersonaStep {
   /** short imperative title */
   t: string;
   /** detail / why it matters */
@@ -119,7 +121,7 @@ export interface Persona {
   focus: string;
   brief: string;
   priorities: string[];
-  steps: WorkflowStep[];
+  steps: PersonaStep[];
   actions: SuggestedAction[];
   /** per-doc relevance boost */
   boosts: Partial<Record<DocId, number>>;
@@ -144,4 +146,135 @@ export interface MockUser {
   name: string;
   email: string;
   company: string;
+}
+
+/* ============================================================
+   MULTI-AGENT PIPELINE TYPES
+   Produced by lib/agents/* and consumed by the report + print
+   pages. These are self-contained and market/persona-aware.
+   ============================================================ */
+
+/** Input to the generation pipeline / API route. */
+export interface AgentInput {
+  market: string;
+  /** predefined persona title, e.g. "Support Agent" */
+  persona: string;
+  /** free-text custom role; takes priority when non-empty */
+  customPersona?: string;
+  /** document slug ids, e.g. "security-compliance-whitepaper" */
+  selectedDocumentIds: string[];
+  /** optional explicit report id (used for demo scenarios) */
+  id?: string;
+}
+
+/** Static metadata for a demo document. */
+export interface DocumentMeta {
+  id: string;
+  title: string;
+  short: string;
+  type: string;
+  category: string;
+  /** e.g. "48 pages", "320 endpoints", "5 tabs" */
+  extent: string;
+  lastUpdated: string;
+  format: string;
+  citationPrefix: string;
+  /** ordered citation ids aligned to markdown sections */
+  citationIds: string[];
+  usedByPersonas: string[];
+  topics: string[];
+}
+
+/** A parsed section of a document. */
+export interface DocumentSection {
+  documentId: string;
+  source: string;
+  sectionTitle: string;
+  excerpt: string;
+  category: string;
+  citationId: string;
+}
+
+export interface AgentStep {
+  agent: string;
+  status: "complete" | "running" | "queued";
+  detail: string;
+  duration: string;
+}
+
+export interface PersonaBrief {
+  title: string;
+  description: string;
+  goals: string[];
+  priorities: string[];
+  relevantTopics: string[];
+  riskFocus: string[];
+  outputStyle: string;
+  /** true when derived from a free-text custom role */
+  isCustom: boolean;
+}
+
+export interface WorkflowStep {
+  step: number;
+  title: string;
+  description: string;
+  whyItMatters: string;
+  expectedOutput: string;
+  evidenceCode: string;
+}
+
+export interface RiskItem {
+  severity: "High" | "Medium" | "Low";
+  title: string;
+  description: string;
+  businessImpact: string;
+  evidenceCode: string;
+  recommendedFix: string;
+  owner: string;
+}
+
+export interface Citation {
+  id: string;
+  source: string;
+  section: string;
+  excerpt: string;
+  whyItMatters: string;
+}
+
+export interface DocumentRelevance {
+  document: string;
+  score: number;
+}
+
+export interface ReportMetrics {
+  documentsAnalyzed: number;
+  passagesIndexed: number;
+  citationsUsed: number;
+  risksFlagged: number;
+  confidence: number;
+  personaRelevanceScore: number;
+  workflowCompleteness: number;
+  citationCoverage: number;
+  complianceSensitivity: "Low" | "Moderate" | "High";
+  documentRelevance: DocumentRelevance[];
+}
+
+export interface EvidentiaReport {
+  id: string;
+  company: string;
+  market: string;
+  persona: string;
+  customPersona?: string;
+  category: string;
+  generatedAt: string;
+  confidence: number;
+  summary: string;
+  topFinding: string;
+  agentSteps: AgentStep[];
+  personaBrief: PersonaBrief;
+  workflowSteps: WorkflowStep[];
+  risks: RiskItem[];
+  citations: Citation[];
+  metrics: ReportMetrics;
+  suggestedActions: SuggestedAction[];
 }
