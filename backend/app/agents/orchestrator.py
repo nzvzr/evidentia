@@ -85,21 +85,24 @@ def _llm_report_polish(report: Dict[str, Any], sections: List[Dict[str, Any]], m
     settings = get_settings()
     pack = build_evidence_pack(report, sections)
     pack_text = pack_to_text(pack, settings.evidentia_max_context_chars)
+    # topFinding stays deterministic (clean, executive, correctly spaced), so the
+    # LLM only sharpens the summary, actions, and (optionally) the persona brief.
     user = (
-        f"Deterministic draft summary:\n{report['summary']}\n\n"
-        f"Deterministic top finding:\n{report['topFinding']}\n\n"
+        f"Deterministic draft summary (match this concrete style, do not add hype):\n{report['summary']}\n\n"
         f"Current persona brief description:\n{report['personaBrief']['description']}\n\n"
         f"Evidence pack (JSON — the ONLY facts you may use):\n{pack_text}\n\n"
-        "Rewrite the summary (<=4 sentences), a one-sentence topFinding, 3-4 imperative suggestedActions, "
-        "and optionally a sharper personaBriefDescription. Ground claims in the evidence pack citations."
+        "Write a summary of at most 4 sentences that names the persona, market, document/risk/citation counts, "
+        "the highest-severity issue with its evidence code, and the top 3 workflow steps. "
+        "Then 3-4 short imperative suggestedActions, each with a one-line description and a priority. "
+        "Optionally sharpen personaBriefDescription. Be specific and grounded; never use generic phrases like "
+        "'structured workflow should be followed' or 'several additional risks require attention'."
     )
     result = generate_structured_object(
         system=ANALYST_SYSTEM,
         user=user,
         schema_name="ReportNarrative",
         schema={
-            "summary": "string",
-            "topFinding": "string",
+            "summary": "string (<=4 sentences)",
             "suggestedActions": [{"title": "string", "description": "string", "priority": "High|Medium|Low"}],
             "personaBriefDescription": "string (optional)",
         },
@@ -113,10 +116,6 @@ def _llm_report_polish(report: Dict[str, Any], sections: List[Dict[str, Any]], m
     summary = data.get("summary")
     if isinstance(summary, str) and is_precise_text(summary, max_len=700):
         updates["summary"] = summary.strip()
-
-    top_finding = data.get("topFinding")
-    if isinstance(top_finding, str) and is_precise_text(top_finding, max_len=280):
-        updates["topFinding"] = top_finding.strip()
 
     desc = data.get("personaBriefDescription")
     if isinstance(desc, str) and is_precise_text(desc, max_len=500):
@@ -133,9 +132,17 @@ def _llm_report_polish(report: Dict[str, Any], sections: List[Dict[str, Any]], m
                 continue
             if not is_precise_text(title, max_len=120):
                 continue
-            desc_a = a.get("description") if isinstance(a.get("description"), str) else ""
+            description = a.get("description") if isinstance(a.get("description"), str) else ""
+            description = description.strip()
             priority = a.get("priority") if a.get("priority") in ("High", "Medium", "Low") else "Medium"
-            clean.append({"title": title.strip(), "detail": desc_a.strip(), "priority": priority})
+            # Emit both keys: the frontend reads `detail`; `description` mirrors it
+            # for consumers expecting the richer schema.
+            clean.append({
+                "title": title.strip(),
+                "detail": description,
+                "description": description,
+                "priority": priority,
+            })
         if clean:
             updates["suggestedActions"] = clean[:4]
 
@@ -374,8 +381,7 @@ def run_pipeline(
             context_chars += r_polish.input_chars
             if "summary" in updates:
                 report["summary"] = updates["summary"]
-            if "topFinding" in updates:
-                report["topFinding"] = updates["topFinding"]
+            # topFinding is intentionally kept deterministic (clean + executive).
             if "personaBriefDescription" in updates:
                 report["personaBrief"]["description"] = updates["personaBriefDescription"]
             if "suggestedActions" in updates:

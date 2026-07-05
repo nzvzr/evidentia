@@ -28,6 +28,10 @@ VAGUE_PHRASES = [
     "cutting-edge",
     "seamless experience",
     "empower your team",
+    "structured workflow should be followed",
+    "several additional risks require attention",
+    "additional risks require attention",
+    "should be followed to ensure",
 ]
 
 

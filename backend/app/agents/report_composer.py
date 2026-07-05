@@ -117,9 +117,9 @@ def report_composer(
     summary = (
         f"For {persona_title} in {market}, Evidentia analyzed {metrics['documentsAnalyzed']} documents and "
         f"found {metrics['risksFlagged']} risks across {metrics['citationsUsed']} grounded citations. "
-        f"The main blocker is {top_risk_title}, supported by {top_evidence}. "
+        f"The highest-severity issue is {top_risk_title}, supported by {top_evidence}. "
         f"The recommended workflow prioritizes {step_titles[0]}, {step_titles[1]}, and {step_titles[2]}. "
-        f"Use the cited playbook to resolve the highest-severity items before customer or audit review."
+        f"Resolve residency and SLA issues before customer or audit review."
     )
 
     return {
