@@ -1,10 +1,70 @@
-# Evidentia
+<p align="center">
+  <img src="./public/evidentia-logo.png" alt="Evidentia logo" width="420" />
+</p>
 
-**Evidentia** is a persona-aware documentation agent that transforms static enterprise documentation into role-specific workflows, risk insights, traceable citations, dashboard metrics, and exportable playbooks.
+<h1 align="center">Evidentia</h1>
+
+<p align="center">
+  Persona-aware documentation agent for role-specific workflows, cited recommendations, risks, dashboards, and exportable playbooks.
+</p>
+
+---
+
+**Evidentia** transforms static enterprise documentation into role-specific workflows, risk insights, traceable citations, dashboard metrics, and exportable playbooks.
 
 Built for the **RAISE Summit Hackathon**.
 
 > Static documentation is written once, but every team uses it differently. Evidentia turns scattered company docs into actionable playbooks adapted to each role, market, and business context.
+
+Evidentia now includes:
+
+- a **Next.js** frontend (App Router, TypeScript, Tailwind CSS)
+- a **Next.js API route** backend (`POST /api/generate-workflow`)
+- a **deterministic multi-agent pipeline** (no LLM required)
+- a local **demo document corpus** (Markdown + metadata)
+- a **report library** and interactive dashboard
+- a **playbook / PDF export** page (print-ready A4)
+- a **documents manager**
+- **localStorage** report persistence
+- **no database**
+- **no required external API key**
+
+---
+
+## How it works
+
+When you select documents, a market, and a persona (or a custom role) and click **Run workflow**, Evidentia runs a deterministic multi-agent pipeline that turns static docs into a cited, persona-specific playbook:
+
+```txt
+Document Ingest → Persona Modeler → Semantic Retrieval → Risk Analyzer → Citation Binder → Metrics Agent → Playbook Composer
+```
+
+Each agent contributes one structured part of the final report — parsed sections, a persona brief, ranked evidence, risks, bound citations, metrics, and the assembled playbook. The pipeline runs in the API route and can also run directly in the browser as an offline fallback, so the demo works with no backend service and no API key.
+
+---
+
+## Run locally
+
+```bash
+npm install
+npm run dev
+```
+
+Then open **http://localhost:3000** and walk the flow:
+
+1. `/` — landing page (nav links smooth-scroll to Product / Security / Docs / Pricing; "Sign in" opens the mock auth modal).
+2. `/workspace` — select documents, a market, and a persona (or describe a custom role), then **Run workflow**.
+3. `/running` — the visible 7-agent pipeline animates, then redirects to the generated report.
+4. `/reports/[id]` — the persona-aware dashboard. Click **Export playbook (PDF)**.
+5. `/playbook/[id]/print` — a dedicated 6-page A4 export preview. Click **Print / Save as PDF**.
+
+Generated reports persist in `localStorage`; `/reports`, `/playbooks`, and `/documents` list the demo corpus and any reports you generate.
+
+Production build:
+
+```bash
+npm run build
+```
 
 ---
 
@@ -453,14 +513,15 @@ It flagged 4 risks, attached 11 citations, and generated a workflow for building
 ## Tech Stack
 
 ```txt
-Frontend: Next.js, TypeScript, Tailwind CSS, shadcn/ui
-Backend: Next.js API routes
-AI: GPT / Claude with deterministic fallback
+Frontend:  Next.js (App Router), TypeScript, Tailwind CSS
+Backend:   Next.js API route (/api/generate-workflow)
+Pipeline:  Deterministic multi-agent orchestrator (no LLM required)
+Storage:   localStorage (no database)
+Auth:      Mock only (no external auth provider)
 Deployment: Vercel
-Development: Cursor / Claude / GPT
 ```
 
-The MVP works with demo data first and can later connect to real enterprise documentation sources.
+The MVP works fully offline with a local demo corpus and deterministic agents — no API key required. An optional LLM synthesis step can be layered behind the same pipeline interface later.
 
 ---
 
@@ -468,71 +529,82 @@ The MVP works with demo data first and can later connect to real enterprise docu
 
 ```txt
 evidentia/
-  README.md
-  .env.example
-  .gitignore
-
-  app/
-    layout.tsx
-    page.tsx
-    workspace/
-      page.tsx
-    running/
-      page.tsx
-    report/
-      page.tsx
-    playbook/
-      page.tsx
-    api/
-      generate-workflow/
-        route.ts
-
-  components/
-    Logo.tsx
-    UploadDocs.tsx
-    MarketSelector.tsx
-    PersonaSelector.tsx
-    CustomRoleInput.tsx
-    AgentTimeline.tsx
-    MetricsDashboard.tsx
-    PersonaBrief.tsx
-    WorkflowSteps.tsx
-    RiskCard.tsx
-    CitationPanel.tsx
-    DocumentRelevanceChart.tsx
-    SuggestedActions.tsx
-    ExportPlaybookButton.tsx
-    PlaybookLayout.tsx
-
-  lib/
-    demoDocs.ts
-    demoReport.ts
-    markets.ts
-    personas.ts
-    prompt.ts
-    types.ts
-    agents/
-      orchestrator.ts
-      documentIngestAgent.ts
-      personaModelerAgent.ts
-      semanticRetrievalAgent.ts
-      riskAnalyzerAgent.ts
-      briefSynthesizerAgent.ts
-      citationBinderAgent.ts
-      playbookComposerAgent.ts
-
-  demo-data/
-    security_compliance_whitepaper.md
-    platform_api_reference.md
-    sla_uptime_commitment.md
-    deployment_migration_guide.md
-    data_residency_policy.md
-    incident_response_runbook.md
-    pricing_packaging_sheet.md
-    customer_onboarding_handbook.md
-
-  public/
-    logo.png
+├── app/
+│   ├── api/
+│   │   └── generate-workflow/
+│   │       └── route.ts          # POST — runs the multi-agent pipeline
+│   ├── documents/
+│   │   └── page.tsx              # /documents — corpus manager
+│   ├── playbook/
+│   │   └── [id]/
+│   │       └── print/
+│   │           └── page.tsx      # /playbook/[id]/print — A4 PDF export
+│   ├── playbooks/
+│   │   └── page.tsx              # /playbooks — playbook library
+│   ├── reports/
+│   │   ├── [id]/
+│   │   │   └── page.tsx          # /reports/[id] — interactive dashboard
+│   │   └── page.tsx              # /reports — reports library
+│   ├── running/
+│   │   └── page.tsx              # /running — animated pipeline
+│   ├── workspace/
+│   │   └── page.tsx              # /workspace — configuration flow
+│   ├── globals.css               # theme + print CSS
+│   ├── layout.tsx
+│   └── page.tsx                  # / — landing page
+├── components/
+│   ├── AppShell.tsx
+│   ├── AppSidebar.tsx
+│   ├── AuthModal.tsx
+│   ├── Logo.tsx
+│   ├── SettingsModal.tsx
+│   ├── SignInForm.tsx
+│   └── SignUpForm.tsx
+├── data/
+│   ├── documents/                # demo corpus (Markdown source of truth)
+│   │   ├── security-compliance-whitepaper.md
+│   │   ├── platform-api-reference.md
+│   │   ├── sla-uptime-commitment.md
+│   │   ├── deployment-migration-guide.md
+│   │   ├── data-residency-sovereignty-policy.md
+│   │   ├── incident-response-runbook.md
+│   │   ├── pricing-packaging-sheet.md
+│   │   └── customer-onboarding-handbook.md
+│   ├── documentContent.ts        # isomorphic mirror of the .md files
+│   ├── demoDocuments.ts          # document metadata (slugs, citation ids)
+│   ├── scenarios.ts              # demo pipeline scenarios
+│   └── demoReports.ts            # precomputed fallback reports
+├── lib/
+│   ├── agents/
+│   │   ├── orchestrator.ts       # runEvidentiaAgents(input)
+│   │   ├── documentReaderAgent.ts
+│   │   ├── personaMapperAgent.ts
+│   │   ├── workflowBuilderAgent.ts
+│   │   ├── riskAgent.ts
+│   │   ├── citationAgent.ts
+│   │   ├── metricsAgent.ts
+│   │   └── reportAgent.ts
+│   ├── reportsStore.ts           # localStorage report persistence
+│   ├── workspaceMapping.ts       # UI selection → pipeline input
+│   ├── pendingRun.ts
+│   ├── types.ts
+│   ├── demoDocs.ts               # UI document corpus
+│   ├── demoReport.ts
+│   ├── personas.ts
+│   ├── markets.ts
+│   ├── scenarios.ts              # report categories + playbook templates
+│   ├── uploads.ts
+│   ├── useMockAuth.ts
+│   ├── useSettings.ts
+│   └── useWorkspace.ts
+├── public/
+│   └── evidentia-logo.png
+├── next.config.mjs
+├── postcss.config.mjs
+├── tailwind.config.ts
+├── tsconfig.json
+├── package.json
+└── README.md
 ```
 
 ---
