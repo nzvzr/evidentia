@@ -95,6 +95,14 @@ Point the frontend at it (repo root `.env.local`):
 EVIDENTIA_BACKEND_URL=http://localhost:8000
 ```
 
+The backend has three cost modes via `EVIDENTIA_LLM_INTENSITY`:
+
+- **`off`** — deterministic only, no LLM calls (also used whenever no key is set).
+- **`summary`** (default, recommended) — deterministic pipeline + **one** LLM call to polish the summary, top finding, and suggested actions.
+- **`full`** — deterministic pipeline + up to **3** LLM calls; more expensive, for demos/testing.
+
+The LLM only receives a compact, grounded **evidence pack** (never full documents in summary mode), outputs are token-capped and validated for precision, citations stay grounded in the local corpus, and repeated requests are cached in-memory. API keys live only in `backend/.env`.
+
 Endpoints: `GET /health`, `GET /api/documents`, `POST /api/generate-workflow`. See [`backend/README.md`](./backend/README.md).
 
 ---
