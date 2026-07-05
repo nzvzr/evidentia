@@ -5,11 +5,12 @@ import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { generateReportForId } from "@/data/demoReports";
 import { resolveStoredReport } from "@/lib/reportsStore";
+import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
-/** Agents that are refined by the LLM when in llm-assisted mode. */
+/** Agents refined by the LLM in full (llm-assisted) mode. */
 const LLM_AGENTS = new Set([
   "Persona Modeler",
   "Risk Analyzer",
@@ -17,6 +18,9 @@ const LLM_AGENTS = new Set([
   "Playbook Composer",
   "Brief Synthesizer",
 ]);
+/** Agents refined by the LLM in summary mode (single final call). */
+const SUMMARY_LLM_AGENTS = new Set(["Persona Modeler", "Playbook Composer"]);
+const EMPTY_SET = new Set<string>();
 
 function formatStamp(iso: string): string {
   const d = new Date(iso);
@@ -37,16 +41,29 @@ export default function ReportDetailPage() {
   const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
-    setReport(resolveStoredReport(id, generateReportForId));
+    let cancelled = false;
+    // Backend (DB) first, then localStorage / deterministic fallback.
+    (async () => {
+      const backendReport = await fetchBackendReport(id);
+      if (cancelled) return;
+      setReport(backendReport ?? resolveStoredReport(id, generateReportForId));
+    })();
     const t = setTimeout(() => setChartReady(true), 160);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [id]);
 
   const { metrics, personaBrief } = report;
   const openPrint = () => window.open(`/playbook/${report.id}/print`, "_blank");
 
   const mode = report.generationMode ?? "deterministic";
-  const isLlm = mode === "llm-assisted";
+  const isLlm = mode.startsWith("llm");
+  const modeLabel =
+    mode === "llm-summary" ? "LLM-SUMMARY" : mode === "llm-assisted" ? "LLM-ASSISTED" : "DETERMINISTIC";
+  const llmAgentSet =
+    mode === "llm-summary" ? SUMMARY_LLM_AGENTS : mode === "llm-assisted" ? LLM_AGENTS : EMPTY_SET;
 
   const metricCards = [
     { k: "Documents", v: String(metrics.documentsAnalyzed), s: "of 8 available", accent: false },
@@ -99,7 +116,7 @@ export default function ReportDetailPage() {
                 }}
                 title={isLlm && report.llmModel ? `${report.llmProvider} · ${report.llmModel}` : undefined}
               >
-                {isLlm ? "LLM-ASSISTED" : "DETERMINISTIC"}
+                {modeLabel}
               </span>
               {personaBrief.isCustom && (
                 <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".06em", padding: "4px 9px", borderRadius: 5, color: "var(--ink2)", background: "var(--shell)", border: "1px solid var(--line2)" }}>
@@ -200,7 +217,7 @@ export default function ReportDetailPage() {
                   <div key={t.agent} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", flex: "none" }} />
                     <span style={{ fontSize: 13, color: "var(--ink)", flex: 1 }}>{t.agent}</span>
-                    {isLlm && LLM_AGENTS.has(t.agent) && (
+                    {llmAgentSet.has(t.agent) && (
                       <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, letterSpacing: ".05em", color: "#fff", background: "var(--accent)", padding: "2px 6px", borderRadius: 4 }}>LLM</span>
                     )}
                     <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{t.duration}</span>

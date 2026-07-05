@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Logo from "@/components/Logo";
 import { generateReportForId } from "@/data/demoReports";
 import { resolveStoredReport } from "@/lib/reportsStore";
+import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport, RiskItem } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
@@ -40,12 +41,20 @@ export default function PrintPlaybookPage() {
   const [report, setReport] = useState<EvidentiaReport>(() => generateReportForId(id));
 
   useEffect(() => {
-    setReport(resolveStoredReport(id, generateReportForId));
+    let cancelled = false;
+    (async () => {
+      const backendReport = await fetchBackendReport(id);
+      if (cancelled) return;
+      setReport(backendReport ?? resolveStoredReport(id, generateReportForId));
+    })();
     try {
       window.scrollTo(0, 0);
     } catch {
       /* ignore */
     }
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   const { metrics } = report;
@@ -91,7 +100,7 @@ export default function PrintPlaybookPage() {
               <h1 style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-.03em", lineHeight: 1, margin: "14px 0 0" }}>{report.persona}</h1>
               <div style={{ fontSize: 15, color: "var(--sub)", marginTop: 12 }}>{report.company} — {report.market} market</div>
               <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", letterSpacing: ".08em", marginTop: 8 }}>
-                GENERATION · {mode === "llm-assisted" ? `LLM-ASSISTED${report.llmModel ? ` · ${report.llmModel}` : ""}` : "DETERMINISTIC"}
+                GENERATION · {mode === "deterministic" ? "DETERMINISTIC" : `${mode === "llm-summary" ? "LLM-SUMMARY" : "LLM-ASSISTED"}${report.llmModel ? ` · ${report.llmModel}` : ""}`}
               </div>
             </div>
 

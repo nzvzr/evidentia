@@ -1,0 +1,4 @@
+Alembic migrations for the Evidentia backend.
+
+The database URL is resolved in env.py from app settings (DATABASE_URL, or a
+local SQLite file when unset). See backend/README.md for commands.

@@ -72,6 +72,41 @@ The report dashboard shows a **Deterministic** / **LLM-assisted** badge, and the
 
 ---
 
+## Optional Python backend
+
+A parallel **FastAPI** implementation of the same pipeline lives in [`backend/`](./backend). It returns the identical `EvidentiaReport` JSON and can own the LLM keys server-side.
+
+- The Next.js API route (`app/api/generate-workflow/route.ts`) becomes a **proxy**: if `EVIDENTIA_BACKEND_URL` is set, it forwards requests to the Python backend; otherwise (or if the backend is offline/errors) it uses the built-in TypeScript pipeline.
+- The frontend never sees API keys — the Python backend owns them.
+
+Run the backend:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+Point the frontend at it (repo root `.env.local`):
+
+```
+EVIDENTIA_BACKEND_URL=http://localhost:8000
+```
+
+The backend has three cost modes via `EVIDENTIA_LLM_INTENSITY`:
+
+- **`off`** — deterministic only, no LLM calls (also used whenever no key is set).
+- **`summary`** (default, recommended) — deterministic pipeline + **one** LLM call to polish the summary, top finding, and suggested actions.
+- **`full`** — deterministic pipeline + up to **3** LLM calls; more expensive, for demos/testing.
+
+The LLM only receives a compact, grounded **evidence pack** (never full documents in summary mode), outputs are token-capped and validated for precision, citations stay grounded in the local corpus, and repeated requests are cached in-memory. API keys live only in `backend/.env`.
+
+Endpoints: `GET /health`, `GET /api/documents`, `POST /api/generate-workflow`. See [`backend/README.md`](./backend/README.md).
+
+---
+
 ## Run locally
 
 ```bash
@@ -638,6 +673,34 @@ evidentia/
 │   ├── useMockAuth.ts
 │   ├── useSettings.ts
 │   └── useWorkspace.ts
+├── backend/                      # optional Python FastAPI backend
+│   ├── app/
+│   │   ├── main.py               # FastAPI app (health, documents, generate)
+│   │   ├── core/
+│   │   │   └── config.py         # pydantic-settings config (owns keys)
+│   │   ├── models/
+│   │   │   └── schemas.py
+│   │   ├── agents/
+│   │   │   ├── orchestrator.py
+│   │   │   ├── document_reader.py
+│   │   │   ├── persona_mapper.py
+│   │   │   ├── workflow_builder.py
+│   │   │   ├── risk_analyzer.py
+│   │   │   ├── citation_binder.py
+│   │   │   ├── metrics_agent.py
+│   │   │   └── report_composer.py
+│   │   ├── tools/
+│   │   │   ├── document_search.py
+│   │   │   ├── citation_tools.py
+│   │   │   ├── risk_tools.py
+│   │   │   └── scoring_tools.py
+│   │   ├── services/
+│   │   │   └── llm.py            # OpenAI wrapper (server-only, safe fallback)
+│   │   └── data/
+│   │       └── documents/        # same demo corpus (Markdown)
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── README.md
 ├── public/
 │   └── evidentia-logo.png
 ├── .env.example
