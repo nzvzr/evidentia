@@ -104,21 +104,22 @@ def report_composer(
 ) -> Dict[str, Any]:
     persona_title = persona_brief["title"]
     top_risk = next((r for r in risks if r["severity"] == "High"), risks[0] if risks else None)
+    top_evidence = top_risk["evidenceCode"] if top_risk else "the source corpus"
+    top_risk_title = top_risk["title"] if top_risk else f"{market} readiness"
+
     top_finding = (
-        f"{top_risk['title']}: {top_risk['businessImpact']}"
-        if top_risk
-        else f"Prioritize {market} readiness for the {persona_title}."
+        f"The main blocker for {persona_title} in {market} is {top_risk_title}, supported by {top_evidence}."
     )
 
-    custom_note = " This playbook was generated from a custom role description." if persona_brief.get("isCustom") else ""
-    priorities = ", ".join(persona_brief["priorities"]).lower()
+    step_titles = [w["title"] for w in workflow_steps[:3]]
+    while len(step_titles) < 3:
+        step_titles.append("the cited workflow")
     summary = (
-        f"This playbook translates {PIPELINE_COMPANY}'s enterprise documentation into an operating brief for a "
-        f"{persona_title} in the {market} market.{custom_note} "
-        f"Evidentia analyzed {metrics['documentsAnalyzed']} documents across {metrics['passagesIndexed']:,} passages, "
-        f"linked {metrics['citationsUsed']} source-traced citations, and flagged {metrics['risksFlagged']} risks. "
-        f"The key finding is: {top_finding} "
-        f"The recommended {len(workflow_steps)}-step workflow below is prioritized around {priorities}."
+        f"For {persona_title} in {market}, Evidentia analyzed {metrics['documentsAnalyzed']} documents and "
+        f"found {metrics['risksFlagged']} risks across {metrics['citationsUsed']} grounded citations. "
+        f"The main blocker is {top_risk_title}, supported by {top_evidence}. "
+        f"The recommended workflow prioritizes {step_titles[0]}, {step_titles[1]}, and {step_titles[2]}. "
+        f"Use the cited playbook to resolve the highest-severity items before customer or audit review."
     )
 
     return {

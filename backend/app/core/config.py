@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     evidentia_use_llm: bool = False
     evidentia_llm_provider: str = "openai"
     evidentia_llm_model: str = "gpt-4o-mini"
+    # off | summary | full  (default: summary — one LLM call)
+    evidentia_llm_intensity: str = "summary"
+    evidentia_max_context_chars: int = 6000
+    evidentia_max_output_tokens: int = 700
+    evidentia_enable_cache: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -32,11 +37,20 @@ class Settings(BaseSettings):
             return bool(self.anthropic_api_key)
         return False
 
+    def effective_intensity(self) -> str:
+        """Resolved intensity: 'off' unless the LLM is enabled and a mode is set."""
+        if not self.is_llm_enabled():
+            return "off"
+        val = (self.evidentia_llm_intensity or "summary").lower()
+        if val not in ("off", "summary", "full"):
+            val = "summary"
+        return val
+
     def active_provider(self) -> str:
-        return self.evidentia_llm_provider if self.is_llm_enabled() else "none"
+        return self.evidentia_llm_provider if self.effective_intensity() != "off" else "none"
 
     def active_model(self):
-        return self.evidentia_llm_model if self.is_llm_enabled() else None
+        return self.evidentia_llm_model if self.effective_intensity() != "off" else None
 
 
 @lru_cache

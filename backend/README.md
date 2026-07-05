@@ -53,11 +53,35 @@ cp .env.example .env
 # then edit .env:
 #   OPENAI_API_KEY=sk-...
 #   EVIDENTIA_USE_LLM=true
+#   EVIDENTIA_LLM_INTENSITY=summary
 ```
 
 The backend owns the API keys. They are never returned in responses and never
 exposed to the browser. If the LLM call fails, each step falls back to
 deterministic output and the request still succeeds.
+
+### LLM intensity (cost control)
+
+`EVIDENTIA_LLM_INTENSITY` controls how much the LLM is used:
+
+| Mode | LLM calls | generationMode | When |
+|------|-----------|----------------|------|
+| `off` | 0 | `deterministic` | Free, reproducible. Also used whenever no key is set. |
+| `summary` | **1** | `llm-summary` | **Recommended.** Deterministic pipeline runs, then one call polishes the summary, top finding, suggested actions, and (optionally) the persona brief. |
+| `full` | ≤ 3 | `llm-assisted` | Demos/testing. One call for persona + workflow, one for risks, one for the final narrative. |
+
+Cost controls:
+
+- The LLM receives a compact **evidence pack** (top risks, workflow titles, top 5 citations, metrics) — never the full documents in summary mode. Full mode sends only ranked top sections, capped by `EVIDENTIA_MAX_CONTEXT_CHARS`.
+- Output is bounded by `EVIDENTIA_MAX_OUTPUT_TOKENS` (summary mode is capped to 500).
+- Repeated identical requests are served from an in-memory cache (`EVIDENTIA_ENABLE_CACHE=true`) — no extra LLM calls.
+- Outputs are validated for precision (no vague/marketing phrasing, no corruption); failing fields keep the deterministic baseline. Citations are always grounded in the local corpus.
+
+Each request logs a usage line (no keys), e.g.:
+
+```
+[Evidentia LLM] intensity=summary calls=1 model=gpt-4o-mini contextChars=4120 mode=llm-summary
+```
 
 ## Wire the frontend to the backend
 
