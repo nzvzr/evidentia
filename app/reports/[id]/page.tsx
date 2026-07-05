@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { generateReportForId } from "@/data/demoReports";
 import { resolveStoredReport } from "@/lib/reportsStore";
+import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
@@ -40,9 +41,18 @@ export default function ReportDetailPage() {
   const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
-    setReport(resolveStoredReport(id, generateReportForId));
+    let cancelled = false;
+    // Backend (DB) first, then localStorage / deterministic fallback.
+    (async () => {
+      const backendReport = await fetchBackendReport(id);
+      if (cancelled) return;
+      setReport(backendReport ?? resolveStoredReport(id, generateReportForId));
+    })();
     const t = setTimeout(() => setChartReady(true), 160);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [id]);
 
   const { metrics, personaBrief } = report;

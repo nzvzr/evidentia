@@ -6,6 +6,7 @@ import AppShell from "@/components/AppShell";
 import { DEMO_REPORTS } from "@/data/demoReports";
 import { REPORT_CATEGORIES } from "@/lib/scenarios";
 import { getReports } from "@/lib/reportsStore";
+import { fetchBackendReports } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
@@ -51,19 +52,42 @@ function toCard(r: EvidentiaReport, isLocal: boolean): Card {
 export default function ReportsPage() {
   const router = useRouter();
   const [stored, setStored] = useState<EvidentiaReport[]>([]);
+  const [backendReports, setBackendReports] = useState<EvidentiaReport[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("All");
 
   useEffect(() => {
     setStored(getReports());
+    // Backend (DB) reports first; localStorage remains a fallback.
+    let cancelled = false;
+    fetchBackendReports().then((reports) => {
+      if (!cancelled) setBackendReports(reports);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const cards: Card[] = useMemo(() => {
-    const localCards = stored.map((r) => toCard(r, true));
-    const localIds = new Set(localCards.map((c) => c.id));
-    const demoCards = DEMO_REPORTS.filter((r) => !localIds.has(r.id)).map((r) => toCard(r, false));
-    return [...localCards, ...demoCards];
-  }, [stored]);
+    const seen = new Set<string>();
+    const out: Card[] = [];
+    for (const r of backendReports) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push(toCard(r, true));
+    }
+    for (const r of stored) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push(toCard(r, true));
+    }
+    for (const r of DEMO_REPORTS) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push(toCard(r, false));
+    }
+    return out;
+  }, [backendReports, stored]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

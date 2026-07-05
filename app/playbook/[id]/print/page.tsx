@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Logo from "@/components/Logo";
 import { generateReportForId } from "@/data/demoReports";
 import { resolveStoredReport } from "@/lib/reportsStore";
+import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport, RiskItem } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
@@ -40,12 +41,20 @@ export default function PrintPlaybookPage() {
   const [report, setReport] = useState<EvidentiaReport>(() => generateReportForId(id));
 
   useEffect(() => {
-    setReport(resolveStoredReport(id, generateReportForId));
+    let cancelled = false;
+    (async () => {
+      const backendReport = await fetchBackendReport(id);
+      if (cancelled) return;
+      setReport(backendReport ?? resolveStoredReport(id, generateReportForId));
+    })();
     try {
       window.scrollTo(0, 0);
     } catch {
       /* ignore */
     }
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   const { metrics } = report;
