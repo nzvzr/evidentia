@@ -277,4 +277,10 @@ export interface EvidentiaReport {
   citations: Citation[];
   metrics: ReportMetrics;
   suggestedActions: SuggestedAction[];
+  /** how the report was produced */
+  generationMode?: "deterministic" | "llm-assisted";
+  /** LLM provider used, or "none" for deterministic */
+  llmProvider?: "openai" | "anthropic" | "none";
+  /** LLM model used, when llm-assisted */
+  llmModel?: string;
 }

@@ -152,5 +152,7 @@ export function reportAgent(args: ReportAgentArgs): EvidentiaReport {
     citations: args.citations,
     metrics: args.metrics,
     suggestedActions: SUGGESTED_ACTIONS[args.personaKey],
+    generationMode: "deterministic",
+    llmProvider: "none",
   };
 }
