@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runEvidentiaAgents } from "@/lib/agents/orchestrator";
+import { runEvidentiaAgentsV2 } from "@/lib/agents/llmOrchestrator";
 import type { AgentInput } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -43,9 +43,11 @@ export async function POST(request: Request) {
   };
 
   try {
-    const report = runEvidentiaAgents(input, {
+    const report = await runEvidentiaAgentsV2(input, {
       generatedAt: new Date().toISOString(),
     });
+    // generationMode / llmProvider / llmModel are embedded in the report.
+    // API keys are never included in the response.
     return NextResponse.json(report, { status: 200 });
   } catch (error) {
     return NextResponse.json(

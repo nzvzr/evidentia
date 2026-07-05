@@ -49,6 +49,7 @@ export default function PrintPlaybookPage() {
   }, [id]);
 
   const { metrics } = report;
+  const mode = report.generationMode ?? "deterministic";
   const counts = {
     High: report.risks.filter((r) => r.severity === "High").length,
     Medium: report.risks.filter((r) => r.severity === "Medium").length,
@@ -89,6 +90,9 @@ export default function PrintPlaybookPage() {
               <div style={{ fontFamily: mono, fontSize: 11, color: "var(--accent)", letterSpacing: ".16em", textTransform: "uppercase" }}>Persona Playbook</div>
               <h1 style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-.03em", lineHeight: 1, margin: "14px 0 0" }}>{report.persona}</h1>
               <div style={{ fontSize: 15, color: "var(--sub)", marginTop: 12 }}>{report.company} — {report.market} market</div>
+              <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", letterSpacing: ".08em", marginTop: 8 }}>
+                GENERATION · {mode === "llm-assisted" ? `LLM-ASSISTED${report.llmModel ? ` · ${report.llmModel}` : ""}` : "DETERMINISTIC"}
+              </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", border: "1px solid var(--line2)", borderRadius: 9, overflow: "hidden", marginTop: 30 }}>

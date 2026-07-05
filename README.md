@@ -21,6 +21,7 @@ Evidentia now includes:
 - a **Next.js** frontend (App Router, TypeScript, Tailwind CSS)
 - a **Next.js API route** backend (`POST /api/generate-workflow`)
 - a **deterministic multi-agent pipeline** (no LLM required)
+- an **optional LLM-assisted refinement layer** (OpenAI, off by default)
 - a local **demo document corpus** (Markdown + metadata)
 - a **report library** and interactive dashboard
 - a **playbook / PDF export** page (print-ready A4)
@@ -40,6 +41,34 @@ Document Ingest → Persona Modeler → Semantic Retrieval → Risk Analyzer →
 ```
 
 Each agent contributes one structured part of the final report — parsed sections, a persona brief, ranked evidence, risks, bound citations, metrics, and the assembled playbook. The pipeline runs in the API route and can also run directly in the browser as an offline fallback, so the demo works with no backend service and no API key.
+
+---
+
+## Deterministic vs. LLM-assisted mode
+
+Evidentia ships with two interchangeable generation modes behind the same API and UI:
+
+- **Deterministic (default).** With no keys configured, the app runs a rule-based multi-agent pipeline over the local demo corpus. It is fully offline, reproducible, and requires **no API key**.
+- **LLM-assisted (optional).** With `OPENAI_API_KEY` set and `EVIDENTIA_USE_LLM=true`, LLM agents **refine** the deterministic baseline — improving persona modeling, workflows, risks, citations, and the report narrative. The deterministic output is always produced first and is used as the fallback for any step that fails.
+
+Key guarantees:
+
+- **Citations stay grounded** in the local document corpus — the citation agent only accepts source ids that exist in the analyzed sections, so evidence is never invented.
+- **No keys are exposed client-side.** Secrets are read only in server code (`lib/env.ts`), never via `NEXT_PUBLIC_*`, and never returned in API responses.
+- **The API never crashes.** If the LLM is disabled, misconfigured, or errors, each step falls back to deterministic output and the request still returns `200`.
+
+Enable LLM mode:
+
+```bash
+cp .env.example .env.local
+# then edit .env.local:
+#   OPENAI_API_KEY=sk-...
+#   EVIDENTIA_USE_LLM=true
+```
+
+Relevant env vars (see `.env.example`): `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `EVIDENTIA_LLM_PROVIDER`, `EVIDENTIA_LLM_MODEL`, `EVIDENTIA_USE_LLM`.
+
+The report dashboard shows a **Deterministic** / **LLM-assisted** badge, and the agent timeline marks which agents were LLM-refined.
 
 ---
 
@@ -515,7 +544,7 @@ It flagged 4 risks, attached 11 citations, and generated a workflow for building
 ```txt
 Frontend:  Next.js (App Router), TypeScript, Tailwind CSS
 Backend:   Next.js API route (/api/generate-workflow)
-Pipeline:  Deterministic multi-agent orchestrator (no LLM required)
+Pipeline:  Deterministic multi-agent orchestrator + optional LLM refinement (OpenAI)
 Storage:   localStorage (no database)
 Auth:      Mock only (no external auth provider)
 Deployment: Vercel
@@ -576,14 +605,26 @@ evidentia/
 │   └── demoReports.ts            # precomputed fallback reports
 ├── lib/
 │   ├── agents/
-│   │   ├── orchestrator.ts       # runEvidentiaAgents(input)
+│   │   ├── orchestrator.ts       # runEvidentiaAgents (deterministic)
+│   │   ├── llmOrchestrator.ts    # runEvidentiaAgentsV2 (LLM-assisted + fallback)
 │   │   ├── documentReaderAgent.ts
 │   │   ├── personaMapperAgent.ts
 │   │   ├── workflowBuilderAgent.ts
 │   │   ├── riskAgent.ts
 │   │   ├── citationAgent.ts
 │   │   ├── metricsAgent.ts
-│   │   └── reportAgent.ts
+│   │   ├── reportAgent.ts
+│   │   └── llm/                  # optional LLM refinement agents
+│   │       ├── llmPersonaAgent.ts
+│   │       ├── llmWorkflowAgent.ts
+│   │       ├── llmRiskAgent.ts
+│   │       ├── llmCitationAgent.ts
+│   │       └── llmReportAgent.ts
+│   ├── llm/
+│   │   └── provider.ts           # generateStructuredObject (OpenAI, server-only)
+│   ├── tools/
+│   │   └── documentTools.ts      # deterministic app-side tools for agents
+│   ├── env.ts                    # server-only env config (never client-exposed)
 │   ├── reportsStore.ts           # localStorage report persistence
 │   ├── workspaceMapping.ts       # UI selection → pipeline input
 │   ├── pendingRun.ts
@@ -599,6 +640,7 @@ evidentia/
 │   └── useWorkspace.ts
 ├── public/
 │   └── evidentia-logo.png
+├── .env.example
 ├── next.config.mjs
 ├── postcss.config.mjs
 ├── tailwind.config.ts

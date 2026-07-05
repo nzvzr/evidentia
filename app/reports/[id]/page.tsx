@@ -9,6 +9,15 @@ import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
+/** Agents that are refined by the LLM when in llm-assisted mode. */
+const LLM_AGENTS = new Set([
+  "Persona Modeler",
+  "Risk Analyzer",
+  "Citation Binder",
+  "Playbook Composer",
+  "Brief Synthesizer",
+]);
+
 function formatStamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
@@ -35,6 +44,9 @@ export default function ReportDetailPage() {
 
   const { metrics, personaBrief } = report;
   const openPrint = () => window.open(`/playbook/${report.id}/print`, "_blank");
+
+  const mode = report.generationMode ?? "deterministic";
+  const isLlm = mode === "llm-assisted";
 
   const metricCards = [
     { k: "Documents", v: String(metrics.documentsAnalyzed), s: "of 8 available", accent: false },
@@ -72,9 +84,29 @@ export default function ReportDetailPage() {
               Persona report · {report.market}
             </div>
             <h1 style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-.02em", margin: "8px 0 0" }}>{report.persona}</h1>
-            {personaBrief.isCustom && (
-              <div style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", marginTop: 6 }}>CUSTOM ROLE</div>
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontFamily: mono,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: ".06em",
+                  padding: "4px 9px",
+                  borderRadius: 5,
+                  color: isLlm ? "#fff" : "var(--ink2)",
+                  background: isLlm ? "var(--accent)" : "var(--shell)",
+                  border: isLlm ? "none" : "1px solid var(--line2)",
+                }}
+                title={isLlm && report.llmModel ? `${report.llmProvider} · ${report.llmModel}` : undefined}
+              >
+                {isLlm ? "LLM-ASSISTED" : "DETERMINISTIC"}
+              </span>
+              {personaBrief.isCustom && (
+                <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".06em", padding: "4px 9px", borderRadius: 5, color: "var(--ink2)", background: "var(--shell)", border: "1px solid var(--line2)" }}>
+                  CUSTOM ROLE
+                </span>
+              )}
+            </div>
           </div>
           <div style={{ fontFamily: mono, fontSize: 11.5, color: "var(--sub)", textAlign: "right", lineHeight: 1.7 }}>
             <div>GENERATED {formatStamp(report.generatedAt)}</div>
@@ -168,6 +200,9 @@ export default function ReportDetailPage() {
                   <div key={t.agent} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", flex: "none" }} />
                     <span style={{ fontSize: 13, color: "var(--ink)", flex: 1 }}>{t.agent}</span>
+                    {isLlm && LLM_AGENTS.has(t.agent) && (
+                      <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, letterSpacing: ".05em", color: "#fff", background: "var(--accent)", padding: "2px 6px", borderRadius: 4 }}>LLM</span>
+                    )}
                     <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{t.duration}</span>
                   </div>
                 ))}
