@@ -138,7 +138,69 @@ Cost controls:
 Each request logs a usage line (no keys), e.g.:
 
 ```
-[Evidentia LLM] intensity=summary calls=1 model=gpt-4o-mini contextChars=4120 mode=llm-summary
+[Evidentia LLM] intensity=summary->summary calls=1 model=gpt-4o-mini contextChars=4120 mode=llm-summary
+```
+
+### Auto mode
+
+Set `EVIDENTIA_LLM_INTENSITY=auto` to let the pipeline pick `off`/`summary`/`full`
+per request from deterministic-baseline signals:
+
+- **document complexity** (number of selected documents)
+- **contradictions** (documented conflicts/gaps in the corpus)
+- **citation coverage** and **deterministic confidence** (from the baseline metrics)
+- **persona complexity** (custom/free-text roles)
+
+Routing (`app/agents/mode_router.py`): insufficient evidence (≤1 doc) → `summary`;
+contradictions, custom persona, large corpus, or low confidence → `full`; simple,
+well-covered, high-confidence cases → `off`; otherwise `summary`. The existing
+`off`/`summary`/`full` modes are unchanged.
+
+## LLM evaluation & calibration benchmark
+
+A versioned benchmark (`app/eval/`) runs the pipeline across intensity modes over
+a dataset of representative scenarios (`app/eval/dataset.py`, `BENCHMARK_VERSION`)
+covering standard personas, custom personas, conflicting documents, insufficient
+evidence, prompt-injection attempts, and high-risk compliance cases.
+
+For every scenario × mode it records schema validity, citation accuracy, citation
+coverage, persona relevance, action specificity, hallucination warnings, latency,
+token usage, estimated cost, provider, model, prompt version, and cache status,
+plus a **weighted quality score (0–100)**.
+
+Run it and export JSON + CSV:
+
+```bash
+cd backend
+source .venv/bin/activate
+
+# default: deterministic, summary, full
+python scripts/run_benchmark.py
+
+# include the auto router and choose an output directory
+python scripts/run_benchmark.py --modes deterministic,summary,full,auto --out-dir benchmark_results
+```
+
+- With **no key / `EVIDENTIA_USE_LLM=false`**, all modes produce deterministic
+  output (0 tokens, $0) — useful to validate the harness for free.
+- With a key + `EVIDENTIA_USE_LLM=true`, `summary`/`full` make real calls and the
+  report shows token usage, cost, and quality differences between modes.
+
+**Comparing configurations:** run the benchmark under each config (e.g. different
+`EVIDENTIA_LLM_MODEL`, `EVIDENTIA_MAX_CONTEXT_CHARS`, or prompt version), then diff
+the per-mode `summary` block in the JSON (avg quality score, schema-valid rate,
+avg hallucination warnings, total tokens, total estimated cost, avg latency). The
+CSV has one row per scenario × mode for spreadsheet pivots.
+
+Benchmark outputs are written to `--out-dir` (git-ignored) as
+`benchmark_<version>_<timestamp>.json` and `.csv`.
+
+### Tests
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m pytest -q          # includes mode-router and quality-scoring unit tests
 ```
 
 ## Wire the frontend to the backend
