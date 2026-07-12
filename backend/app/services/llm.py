@@ -25,6 +25,8 @@ class LLMCallResult:
     value: Any
     called: bool
     input_chars: int
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 def generate_structured_object(
@@ -37,7 +39,9 @@ def generate_structured_object(
     max_output_tokens: int = 700,
 ) -> LLMCallResult:
     settings = get_settings()
-    if settings.effective_intensity() == "off" or settings.evidentia_llm_provider != "openai":
+    # The orchestrator gates *which* agents call the LLM per resolved mode; here
+    # we only require that an LLM is actually configured and available.
+    if not settings.is_llm_enabled() or settings.evidentia_llm_provider != "openai":
         return LLMCallResult(fallback, False, 0)
 
     schema_text = json.dumps(schema, indent=2)
@@ -62,13 +66,16 @@ def generate_structured_object(
             response_format={"type": "json_object"},
             max_tokens=max_output_tokens,
         )
+        usage = getattr(completion, "usage", None)
+        in_tok = int(getattr(usage, "prompt_tokens", 0) or 0)
+        out_tok = int(getattr(usage, "completion_tokens", 0) or 0)
         content = completion.choices[0].message.content
         if not content:
-            return LLMCallResult(fallback, True, input_chars)
+            return LLMCallResult(fallback, True, input_chars, in_tok, out_tok)
         parsed = json.loads(content)
         if not isinstance(parsed, dict):
-            return LLMCallResult(fallback, True, input_chars)
-        return LLMCallResult(parsed, True, input_chars)
+            return LLMCallResult(fallback, True, input_chars, in_tok, out_tok)
+        return LLMCallResult(parsed, True, input_chars, in_tok, out_tok)
     except Exception as exc:  # noqa: BLE001 - never crash the request
         logger.warning("generate_structured_object(%s) failed: %s", schema_name, exc)
         return LLMCallResult(fallback, True, input_chars)

@@ -43,11 +43,15 @@ class Settings(BaseSettings):
         return False
 
     def effective_intensity(self) -> str:
-        """Resolved intensity: 'off' unless the LLM is enabled and a mode is set."""
+        """Configured intensity: 'off' unless the LLM is enabled and a mode is set.
+
+        May return 'auto' — the orchestrator resolves it to off/summary/full based
+        on document/persona/confidence signals from the deterministic baseline.
+        """
         if not self.is_llm_enabled():
             return "off"
         val = (self.evidentia_llm_intensity or "summary").lower()
-        if val not in ("off", "summary", "full"):
+        if val not in ("off", "summary", "full", "auto"):
             val = "summary"
         return val
 

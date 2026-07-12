@@ -21,9 +21,11 @@ from app.core.config import get_settings
 from app.services.llm import LLMCallResult, generate_structured_object
 from app.tools.document_search import rank_sections_for_persona, summarize_sections
 from app.tools.evidence_pack import build_evidence_pack, pack_to_text
+from app.tools.risk_tools import detect_contradictions
 from app.tools.text_quality import is_precise_text
 
 from .citation_binder import citation_binder
+from .mode_router import RoutingSignals, route_intensity
 from .document_reader import document_reader
 from .metrics_agent import metrics_agent
 from .persona_mapper import persona_mapper, resolve_persona_key
@@ -35,6 +37,10 @@ logger = logging.getLogger("evidentia.pipeline")
 
 DEFAULT_MARKET = "EMEA"
 DEFAULT_PERSONA = "Support Agent"
+
+# Version of the prompt/calibration contract. Bump when prompts change so
+# benchmark results remain comparable across versions.
+PROMPT_VERSION = "v1"
 
 # Calibrated system prompt shared by all LLM calls.
 ANALYST_SYSTEM = (
@@ -304,6 +310,9 @@ def _llm_risks(
 # Orchestration
 # ---------------------------------------------------------------------------
 
+_GEN_MODE = {"off": "deterministic", "summary": "llm-summary", "full": "llm-assisted"}
+
+
 def run_pipeline(
     market: str,
     persona: str,
@@ -311,27 +320,44 @@ def run_pipeline(
     selected_document_ids: List[str],
     generated_at: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Public entrypoint (unchanged contract): returns the report dict."""
+    report, _telemetry = run_pipeline_ex(
+        market, persona, custom_persona, selected_document_ids, generated_at=generated_at
+    )
+    return report
+
+
+def run_pipeline_ex(
+    market: str,
+    persona: str,
+    custom_persona: str,
+    selected_document_ids: List[str],
+    generated_at: Optional[str] = None,
+    intensity_override: Optional[str] = None,
+    use_cache: Optional[bool] = None,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Run the pipeline and return (report, telemetry).
+
+    `intensity_override` forces off/summary/full/auto (used by the benchmark);
+    otherwise the configured EVIDENTIA_LLM_INTENSITY is used. `auto` is resolved
+    from deterministic-baseline signals. The off/summary/full behaviors are
+    unchanged from before.
+    """
+    import time
+
+    started = time.perf_counter()
     settings = get_settings()
     custom_persona = (custom_persona or "").strip()
     market = (market or "").strip() or DEFAULT_MARKET
     persona = (persona or "").strip() if custom_persona else ((persona or "").strip() or DEFAULT_PERSONA)
     generated_at = generated_at or _now_iso()
 
-    intensity = settings.effective_intensity()
+    configured = (intensity_override or settings.effective_intensity()).lower()
     model = settings.evidentia_llm_model
+    cache_enabled = settings.evidentia_enable_cache if use_cache is None else use_cache
 
     documents, sections = document_reader(selected_document_ids)
     doc_ids = [d["id"] for d in documents]
-
-    # --- cache lookup ---
-    cache_key = _cache_key(market, persona, custom_persona, doc_ids, intensity, model)
-    if settings.evidentia_enable_cache and cache_key in _CACHE:
-        logger.info(
-            "[Evidentia LLM] intensity=%s calls=0 model=%s contextChars=0 mode=%s (cache hit)",
-            intensity, model if intensity != "off" else None, _CACHE[cache_key]["generationMode"],
-        )
-        return copy.deepcopy(_CACHE[cache_key])
-
     persona_key = resolve_persona_key(persona, custom_persona)
     report_id = _derive_id(market, persona, custom_persona, doc_ids)
 
@@ -340,11 +366,52 @@ def run_pipeline(
     workflow_steps = workflow_builder(persona_key, market, sections)
     risks = risk_analyzer(persona_key, market, sections)
     citations = citation_binder(sections, workflow_steps, risks)
+    base_metrics = metrics_agent(
+        documents, sections, citations, risks, workflow_steps, market, persona_key, persona_brief["title"]
+    )
+    contradictions = detect_contradictions(sections, market)
+
+    # --- resolve intensity (auto routing) ---
+    if configured == "auto":
+        resolved = route_intensity(
+            RoutingSignals(
+                document_complexity=len(documents),
+                contradictions=contradictions,
+                citation_coverage=float(base_metrics["citationCoverage"]),
+                persona_complexity=1 if persona_brief.get("isCustom") else 0,
+                deterministic_confidence=int(base_metrics["confidence"]),
+            )
+        )
+    else:
+        resolved = configured if configured in ("off", "summary", "full") else "off"
+
+    # Without a configured/available LLM, any llm mode degrades to deterministic.
+    if resolved in ("summary", "full") and not settings.is_llm_enabled():
+        resolved = "off"
+
+    # --- cache lookup (keyed on the resolved mode) ---
+    cache_key = _cache_key(market, persona, custom_persona, doc_ids, resolved, model)
+    cache_status = "disabled"
+    if cache_enabled and cache_key in _CACHE:
+        cached = copy.deepcopy(_CACHE[cache_key])
+        telemetry = _telemetry(
+            configured, resolved, cached["generationMode"], settings, model, 0, 0, 0, 0,
+            "hit", started, contradictions, base_metrics["confidence"],
+        )
+        logger.info(
+            "[Evidentia LLM] intensity=%s->%s calls=0 model=%s mode=%s (cache hit)",
+            configured, resolved, model if resolved != "off" else None, cached["generationMode"],
+        )
+        return cached, telemetry
+    if cache_enabled:
+        cache_status = "miss"
 
     llm_calls = 0
     context_chars = 0
+    input_tokens = 0
+    output_tokens = 0
 
-    if intensity == "full":
+    if resolved == "full":
         try:
             r1, persona_brief, workflow_steps = _llm_persona_workflow(
                 market, persona, custom_persona, sections, persona_brief, workflow_steps,
@@ -352,13 +419,17 @@ def run_pipeline(
             )
             llm_calls += 1 if r1.called else 0
             context_chars += r1.input_chars
+            input_tokens += r1.input_tokens
+            output_tokens += r1.output_tokens
 
             r2, risks = _llm_risks(market, persona_brief, sections, risks, settings.evidentia_max_output_tokens)
             llm_calls += 1 if r2.called else 0
             context_chars += r2.input_chars
+            input_tokens += r2.input_tokens
+            output_tokens += r2.output_tokens
             citations = citation_binder(sections, workflow_steps, risks)  # re-bind grounded evidence
         except Exception:  # noqa: BLE001
-            intensity = "off"  # unexpected failure → deterministic
+            resolved = "off"  # unexpected failure → deterministic
 
     # --- metrics + report assembly (deterministic) ---
     metrics = metrics_agent(
@@ -373,12 +444,14 @@ def run_pipeline(
     )
 
     # --- narrative polish (summary + full share one final call) ---
-    if intensity in ("summary", "full"):
+    if resolved in ("summary", "full"):
         try:
-            max_tokens = 500 if intensity == "summary" else settings.evidentia_max_output_tokens
+            max_tokens = 500 if resolved == "summary" else settings.evidentia_max_output_tokens
             r_polish, updates = _llm_report_polish(report, sections, max_tokens)
             llm_calls += 1 if r_polish.called else 0
             context_chars += r_polish.input_chars
+            input_tokens += r_polish.input_tokens
+            output_tokens += r_polish.output_tokens
             if "summary" in updates:
                 report["summary"] = updates["summary"]
             # topFinding is intentionally kept deterministic (clean + executive).
@@ -390,26 +463,53 @@ def run_pipeline(
             pass
 
     # --- generation metadata ---
-    if intensity == "off":
+    if resolved == "off":
         report["suggestedActions"] = suggested_actions_for(persona_key)
         report["generationMode"] = "deterministic"
         report["llmProvider"] = "none"
         report["llmModel"] = None
-    elif intensity == "summary":
-        report["generationMode"] = "llm-summary"
-        report["llmProvider"] = settings.active_provider()
-        report["llmModel"] = settings.active_model()
-    else:  # full
-        report["generationMode"] = "llm-assisted"
-        report["llmProvider"] = settings.active_provider()
-        report["llmModel"] = settings.active_model()
+    else:
+        report["generationMode"] = _GEN_MODE[resolved]
+        report["llmProvider"] = settings.evidentia_llm_provider
+        report["llmModel"] = model
 
     logger.info(
-        "[Evidentia LLM] intensity=%s calls=%d model=%s contextChars=%d mode=%s",
-        intensity, llm_calls, model if intensity != "off" else None, context_chars, report["generationMode"],
+        "[Evidentia LLM] intensity=%s->%s calls=%d model=%s contextChars=%d mode=%s",
+        configured, resolved, llm_calls, model if resolved != "off" else None, context_chars, report["generationMode"],
     )
 
-    if settings.evidentia_enable_cache:
+    if cache_enabled:
         _CACHE[cache_key] = copy.deepcopy(report)
 
-    return report
+    telemetry = _telemetry(
+        configured, resolved, report["generationMode"], settings, model,
+        llm_calls, context_chars, input_tokens, output_tokens, cache_status, started,
+        contradictions, base_metrics["confidence"],
+    )
+    return report, telemetry
+
+
+def _telemetry(
+    configured, resolved, generation_mode, settings, model,
+    llm_calls, context_chars, input_tokens, output_tokens, cache_status, started,
+    contradictions, deterministic_confidence,
+) -> Dict[str, Any]:
+    import time
+
+    used_llm = resolved in ("summary", "full")
+    return {
+        "intensityConfigured": configured,
+        "intensityResolved": resolved,
+        "generationMode": generation_mode,
+        "provider": settings.evidentia_llm_provider if used_llm else "none",
+        "model": model if used_llm else None,
+        "promptVersion": PROMPT_VERSION,
+        "llmCalls": llm_calls,
+        "contextChars": context_chars,
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "cacheStatus": cache_status,
+        "latencyMs": round((time.perf_counter() - started) * 1000, 2),
+        "contradictions": contradictions,
+        "deterministicConfidence": deterministic_confidence,
+    }
