@@ -1,38 +1,46 @@
 # Evidentia — Session Handoff
 
 _Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-13 (auto-router calibration)._
+_Last updated: 2026-07-13 (deployment readiness)._
 
 ## Where things stand
 
-Backend calibration is complete and green. Pipeline is deterministic-first with
-optional LLM refinement (off/summary/full/auto), a field-level narrative gate, a
-full-mode structural quality gate, source-constrained (evidence-first) generation,
-and deterministic grounding repair. `auto` is now a **calibrated conservative
-router** that resolves to summary on the whole benchmark; full is a manual mode.
+Backend calibration is complete, verified, and **frozen** (do not extend the eval
+framework without a concrete regression). Latest work prepared a **stable public
+demo deployment** (no new features). Pipeline is deterministic-first with optional
+LLM refinement (off/summary/full/auto), a field-level narrative gate, a full-mode
+structural quality gate, source-constrained generation, deterministic grounding
+repair, and a calibrated conservative `auto` router (resolves to summary; full manual).
 
-- **68 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
-- Benchmarked model: **gpt-4o-mini**. App works with no key (deterministic).
+- **68 backend unit tests pass**; **frontend `next lint`/`tsc`/`next build` clean.**
+- App works with no key (deterministic) and no backend (TS fallback). Keys are
+  backend-only; `.env`/`.env.local`/`evidentia.db` git-ignored.
+- Benchmarked model: **gpt-4o-mini**. Public report schema unchanged.
 
-## Just completed — auto-router calibration
+## Just completed — deployment readiness
 
-Rewrote `agents/mode_router.py` to route from **pre-LLM deterministic signals only**
-(deterministic structural + narrative scores, doc complexity, contradictions,
-persona complexity, confidence, citation coverage, grounded risk/step counts,
-dropped risks, insufficient-evidence items, source mismatch, evidence-support avg/min).
-Full is eligible ONLY with a clear analytical weakness AND sufficient
-selected-document evidence AND ≥2 opportunity signals AND predicted gain >
-`EVIDENTIA_ROUTER_FULL_GAIN_THRESHOLD`. Custom persona / one contradiction / big
-corpus / slightly-low confidence never force full; ties prefer the cheaper mode.
-Routing telemetry: `routingReason/Signals/Confidence`, `predictedIncrementalGain`,
-`selectedMode`, `alternativeMode`, `fullEligibilityChecks`.
+- `backend/Dockerfile` (+ `.dockerignore` that keeps the `*.md` corpus), listens on
+  `$PORT`, container healthcheck; pinned `requirements.txt`.
+- Enriched backend `/health`; new frontend `/api/health` (backend reachability).
+- Env-driven CORS (`EVIDENTIA_CORS_ORIGINS`); proxy timeouts
+  (`EVIDENTIA_BACKEND_TIMEOUT_MS` 45s, `EVIDENTIA_BACKEND_READ_TIMEOUT_MS` 8s);
+  `next.config` `output:"standalone"` + `poweredByHeader:false`; `DATABASE_URL`
+  empty → SQLite default.
+- `DEPLOYMENT.md`: topology, env matrix, deploy + rollback checklists, demo reset,
+  smoke test.
+- **Verified locally (prod build)**: health OK; showcase generate 200 (~6s) and
+  **persisted to SQLite + re-fetched by id**; insufficient corpus → `N/A` markers;
+  all routes 200; **backend-down → deterministic fallback ~6ms**. **Cloud deploy
+  NOT performed** (no hosting credentials/URLs) — local verification only.
 
-`scripts/calibrate_router.py` (offline, no threshold tuning first): oracle analysis
-+ policy comparison (always-{det,summary,full}, previous aggressive auto, proposed,
-oracle) under hard cost/latency/regression constraints, threshold grid search, and
-leave-one-category-out validation.
+## Earlier — demo release-readiness (frontend/PDF)
 
-## Verified results (v1, gpt-4o-mini, 22 scenarios)
+Honest `/running` loader (no fake %, timeout/fallback/error states); `N/A` rendered
+as "INSUFFICIENT EVIDENCE" (web + PDF); 3-colour severity; citation `section`; empty
+states; PDF sections flow across pages (no clipping); `showcase-residency-emea`
+scenario; uploads labelled demo-only.
+
+## Verified backend results (v1, gpt-4o-mini, 22 scenarios)
 
 | mode | overall (±std) | grounding | narrative | latency | cost |
 |------|----------------|-----------|-----------|---------|------|
@@ -41,22 +49,16 @@ leave-one-category-out validation.
 | full | 94.8 (3.29) | 93.9 | 95.7 | 24.1 s | $0.0295 |
 | auto | 94.9 (3.76) | 93.9 | 96.0 | 5.2 s | $0.0077 |
 
-- **Oracle** avg 95.47 vs always-summary 95.36 → **gain +0.12** (< 0.2). Full wins
-  in only 2/22; **full is Pareto-dominated** (frontier = {deterministic, summary}).
-- Previous aggressive auto: 95.02 (worse than summary), $0.0259, 18/22→full,
-  constraints ✗. **Proposed router = always-summary** (22/22→summary), constraints ✓.
-  No threshold beats summary by 0.2; LOCO gain 0.0 in every category.
-- **Verdict:** evidence does not justify automatic full routing → auto defaults to
-  summary; full kept as a manual mode. Structural gate keeps full *safe* (full vs
-  summary 2/8/12, −0.54 at ~3.8× cost; 0 structural/grounding regressions).
+## Earlier (backend, frozen)
 
-## Earlier — source-constrained generation (upstream fix)
-
-`risk_analyzer` + `workflow_builder` are evidence-first: an item is emitted only
-when an *owned* source section clears `EVIDENTIA_MIN_EVIDENCE_SUPPORT`; unsupported
-items are dropped (no filler), with one evidence-gap risk when missing docs are
-relevant. This drove repair's invalid-code count 31 → 0 (all grounded upstream).
-Provenance + generation audit are telemetry-only (`*.gen-audit.csv`).
+- **Auto-router calibration** (`agents/mode_router.py`, `scripts/calibrate_router.py`):
+  routes from pre-LLM deterministic signals; full requires analytical weakness +
+  evidence + ≥2 opportunity signals + gain > `EVIDENTIA_ROUTER_FULL_GAIN_THRESHOLD`.
+  Oracle gain over always-summary only +0.12 → **auto = summary; full is manual**
+  (full is Pareto-dominated). Routing telemetry emitted per run.
+- **Full-mode structural gate** + **source-constrained (evidence-first) generation**:
+  invalid-code count 31 → 0 upstream; structural gate keeps full safe (0 regressions).
+- **Grounding repair** (IDF scorer) + **narrative gate**; provenance/audit telemetry-only.
 
 ## Open concerns / next steps
 

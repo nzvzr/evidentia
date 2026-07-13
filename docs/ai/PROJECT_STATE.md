@@ -12,6 +12,12 @@ Deterministic-first pipeline; optional LLM refinement layered on top.
 - **Frontend** (`app/`, `components/`, `lib/`, `data/`): landing, `/workspace`,
   `/running`, `/reports` + `/reports/[id]`, `/playbooks`, `/documents`,
   `/playbook/[id]/print`. Reads reports from the backend with `localStorage` fallback.
+  The `/running` loader shows honest pipeline stages (no fake %), gates completion
+  on the real result, and has timeout/slow/fallback/error states. The report UI and
+  print playbook render insufficient-evidence (`N/A`) items as a distinct
+  "INSUFFICIENT EVIDENCE" marker, use a 3-colour severity scale, and handle empty
+  risk/workflow/citation states. The PDF flows long sections across pages
+  (no clipping).
 - **Next.js API** (`app/api/generate-workflow`, `app/api/reports[...]`): proxies to
   the Python backend when `EVIDENTIA_BACKEND_URL` is set; otherwise runs the
   TypeScript deterministic pipeline (`lib/agents/*`).
@@ -151,6 +157,56 @@ policies before tuning any threshold. Verified on the 4-mode benchmark:
   36 unsupported risk proposals are dropped at the source
   (`sourceDocumentMismatchCount` drives most), and remaining `N/A` items are
   intentional evidence-gap markers, not repaired guesses.
+
+## Demo release-readiness (frontend/PDF pass, verified 2026-07-13)
+
+Product-facing pass over the generation flow (schema, deterministic fallback,
+summary-as-default, full-as-manual, and all backend safeguards preserved):
+
+- **Loading** (`app/running/page.tsx`): honest stage-segmented progress (removed the
+  fake percentage and fabricated per-agent counts), completion gated on the real
+  report, plus slow-notice (22s), local-fallback + hard-timeout (60s), and an error
+  state with retry.
+- **Insufficient evidence**: `evidenceCode === "N/A"` now renders as a distinct
+  dashed "INSUFFICIENT EVIDENCE" marker (web report + PDF risk register + workflow),
+  not a normal citation chip.
+- **Report UI**: 3-colour severity scale (High/Med/Low), citation `section` shown,
+  empty states for risks/workflow/citations.
+- **PDF**: variable-length sections (`.print-flow`) flow across pages instead of
+  clipping at a fixed 297 mm; metadata footer per section; dynamic agent count +
+  next-review date (no stale hardcoded values).
+- **Showcase scenario** `showcase-residency-emea` (Compliance · EMEA, 4 docs) seeds
+  the library end-to-end.
+- **Verified E2E** (Next `/api/generate-workflow` → Python backend, gpt-4o-mini
+  summary): showcase → 3 risks (RES-14/SEC-4.2 High, SLA-5 Med), 5 steps, 8 cited
+  sections, HTTP 200 ~7.5 s; insufficient corpus (support · pricing-only) → 1
+  evidence-gap risk + 3 `N/A` steps rendered as insufficient-evidence. `next lint`,
+  `next build`, `tsc --noEmit` clean; all report/print/workspace/documents pages 200.
+
+## Deployment readiness (verified 2026-07-13)
+
+Prepared for a stable public demo (no new features). See `DEPLOYMENT.md`.
+
+- **Backend container**: `backend/Dockerfile` (+ `.dockerignore` that keeps the
+  `*.md` corpus), listens on `$PORT`, container `HEALTHCHECK` on `/health`. Pinned
+  `requirements.txt`.
+- **Health**: backend `GET /health` → `{status, version, llmEnabled, intensity,
+  dbEnabled}` (no secrets); new frontend `GET /api/health` → `{status,
+  backendConfigured, backendReachable, mode}`.
+- **Config**: env-driven CORS (`EVIDENTIA_CORS_ORIGINS`, default `*`); proxy
+  timeouts (`EVIDENTIA_BACKEND_TIMEOUT_MS` 45s for cold starts,
+  `EVIDENTIA_BACKEND_READ_TIMEOUT_MS` 8s) so a cold/unreachable backend fails fast
+  to the deterministic fallback; `next.config` `output:"standalone"` +
+  `poweredByHeader:false`. `DATABASE_URL` empty → SQLite (zero-config demo).
+- **No hardcoded localhost** in source; backend URL/keys are server-only.
+- **Verified locally (production build)**: `next lint`/`tsc`/`next build` clean;
+  backend `pytest` 68 passed; prod `next start` + backend (SQLite) E2E — frontend
+  `/api/health` `backendReachable:true`; showcase generate HTTP 200 (~6s), report
+  **persisted to SQLite and re-fetched by id**; insufficient corpus → 4 `N/A`
+  markers; all report/print/workspace/documents/library routes 200; **backend-down
+  → deterministic fallback in ~6ms**, health reports `mode:deterministic-fallback`.
+- **Cloud deploy NOT performed** (no hosting credentials/public URLs available);
+  only local production verification was done.
 
 ## Tests
 

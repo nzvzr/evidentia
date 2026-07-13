@@ -21,9 +21,10 @@ logger = logging.getLogger("evidentia.app")
 
 app = FastAPI(title="Evidentia Backend", version="2.0.0")
 
+_settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_settings.cors_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,7 +52,16 @@ def _startup() -> None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Liveness/readiness probe. Reports capability booleans only — never secrets."""
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "service": "evidentia-backend",
+        "version": app.version,
+        "llmEnabled": settings.is_llm_enabled(),
+        "intensity": settings.effective_intensity(),
+        "dbEnabled": settings.is_db_enabled(),
+    }
 
 
 @app.post("/api/generate-workflow")

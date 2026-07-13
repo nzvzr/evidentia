@@ -200,7 +200,8 @@ export default function DocumentsPage() {
         <div style={noteBox}>
           <span style={{ fontFamily: mono, fontSize: 10.5, color: "var(--accent)", letterSpacing: ".08em", fontWeight: 600 }}>DEMO MODE</span>
           <span style={{ fontSize: 13, color: "var(--ink2)" }}>
-            Uploaded documents are processed locally for this session and are not permanently stored.
+            Uploaded files are previewed locally for this session only — they are not stored and are not analyzed by the
+            generation pipeline. Reports are generated from the curated demo corpus above.
           </span>
         </div>
       </div>

@@ -145,7 +145,13 @@ html {
   padding: 16mm;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+}
+
+/* A print section whose content may exceed one physical page: it must flow
+   onto additional pages rather than clip. Screen preview shows it as one long
+   sheet; @media print lets the browser paginate it with correct page breaks. */
+.print-flow {
+  overflow: visible;
 }
 
 .print-only {
@@ -202,7 +208,6 @@ html {
   .print-page,
   .playbook-page {
     width: 210mm !important;
-    height: 297mm !important;
     min-height: 297mm !important;
     margin: 0 auto !important;
     padding: 16mm !important;
@@ -210,6 +215,14 @@ html {
     border: none !important;
     page-break-after: always;
     break-after: page;
+    overflow: visible;
+  }
+
+  /* Fixed-height, single-sheet sections (cover, dashboard) keep their exact
+     page box; flow sections are allowed to grow across multiple printed pages. */
+  .print-page:not(.print-flow),
+  .playbook-page:not(.print-flow) {
+    height: 297mm !important;
     overflow: hidden;
   }
 
@@ -222,5 +235,11 @@ html {
   .avoid-break {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* running headers/footers on flowing sections repeat awkwardly, so let the
+     content own the flow and pin the footer only on fixed sheets. */
+  .print-flow .page-footer {
+    margin-top: 24px;
   }
 }
