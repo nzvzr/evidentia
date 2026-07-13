@@ -12,7 +12,7 @@ from app.eval.dataset import BENCHMARK_VERSION
 
 # Scalar columns for the CSV (list/dict fields are omitted).
 CSV_COLUMNS = [
-    "benchmarkVersion", "promptVersion", "scenarioId", "category", "requestedMode",
+    "benchmarkVersion", "promptVersion", "runIndex", "scenarioId", "category", "requestedMode",
     "intensityConfigured", "intensityResolved", "generationMode", "provider", "model",
     "cacheStatus",
     "overallQualityScore", "groundingScore", "narrativeUtilityScore",
@@ -34,7 +34,15 @@ CSV_COLUMNS = [
     "risksGeneratedBeforeFiltering", "groundedRisksKept", "unsupportedRisksDropped",
     "workflowsGeneratedBeforeFiltering", "groundedWorkflowStepsKept", "unsupportedWorkflowStepsDropped",
     "insufficientEvidenceItemsFinal", "sourceDocumentMismatchCount",
-    "evidenceSupportScoreAvg", "evidenceSupportScoreMin", "expectedRiskRecall",
+    "evidenceSupportScoreAvg", "evidenceSupportScoreMin",
+    # ground-truth match semantics
+    "expectedRiskConceptRecall", "expectedSourceDocumentMatchRate",
+    "expectedCitationFamilyMatchRate", "expectedCitationExactMatchRate",
+    # full-mode structural gate
+    "deterministicStructuralScore", "candidateStructuralScore", "finalStructuralScore",
+    "structuralGateDecision", "acceptedStructuralComponentCount", "rejectedStructuralComponentCount",
+    "acceptedRiskCount", "rejectedRiskCount", "acceptedWorkflowStepCount",
+    "rejectedWorkflowStepCount", "fullModeAnalyticalFallback",
     # change telemetry
     "reportChanged", "summaryChanged", "personaBriefChanged", "suggestedActionsAccepted", "llmFallback",
     "llmCalls", "contextChars", "inputTokens", "outputTokens", "estimatedCostUsd", "latencyMs",

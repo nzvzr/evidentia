@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from statistics import mean
-from typing import Any, Dict, List, Optional
+from statistics import mean, pstdev
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.agents import orchestrator
 from app.agents.orchestrator import run_pipeline_ex
 from app.eval.dataset import BENCHMARK_VERSION, SCENARIOS
-from app.eval.metrics import available_citation_ids, evaluate_report
+from app.eval.metrics import available_citation_ids, evaluate_report, expected_match_metrics
 from app.eval.pricing import estimate_cost
 
 # A replacement below this relevance score is treated as low-confidence.
@@ -24,15 +24,39 @@ MODE_TO_INTENSITY = {
 DEFAULT_MODES = ["deterministic", "summary", "full"]
 
 
+def filter_scenarios(
+    scenarios: List[Dict[str, Any]],
+    scenario_ids: Optional[List[str]] = None,
+    categories: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    out = scenarios
+    if scenario_ids:
+        wanted = set(scenario_ids)
+        out = [s for s in out if s["id"] in wanted]
+    if categories:
+        cats = set(categories)
+        out = [s for s in out if s["category"] in cats]
+    return out
+
+
 def run_benchmark(
     modes: Optional[List[str]] = None,
     scenarios: Optional[List[Dict[str, Any]]] = None,
     clear_cache: bool = True,
+    runs: int = 1,
 ) -> List[Dict[str, Any]]:
     modes = modes or DEFAULT_MODES
     scenarios = scenarios or SCENARIOS
     results: List[Dict[str, Any]] = []
+    for run_index in range(max(1, runs)):
+        results.extend(_run_once(modes, scenarios, clear_cache, run_index))
+    return results
 
+
+def _run_once(
+    modes: List[str], scenarios: List[Dict[str, Any]], clear_cache: bool, run_index: int
+) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
     for scenario in scenarios:
         inp = scenario["input"]
         expected = scenario.get("expected") or {}
@@ -75,18 +99,14 @@ def run_benchmark(
             low_conf = sum(1 for a in replaced if a["relevanceScore"] < LOW_CONFIDENCE_RELEVANCE)
             relevance_sum = sum(a["relevanceScore"] for a in replaced)
 
-            # --- expected-risk recall (grounded risk evidence vs ground truth) ---
-            report_risk_codes = {r["evidenceCode"] for r in report["risks"]}
-            expected_evidence = set(expected.get("evidenceCodes", []))
-            expected_recall = (
-                round(len(expected_evidence & report_risk_codes) / len(expected_evidence), 3)
-                if expected_evidence else None
-            )
+            # --- ground-truth risk/evidence match semantics (4 metrics) ---
+            match = expected_match_metrics(report, expected)
 
             results.append(
                 {
                     "benchmarkVersion": BENCHMARK_VERSION,
                     "promptVersion": tel["promptVersion"],
+                    "runIndex": run_index,
                     "scenarioId": scenario["id"],
                     "category": scenario["category"],
                     "description": scenario["description"],
@@ -149,7 +169,26 @@ def run_benchmark(
                     "evidenceSupportScoreAvg": tel["evidenceSupportScoreAvg"],
                     "evidenceSupportScoreMin": tel["evidenceSupportScoreMin"],
                     "generationAudit": tel["generationAudit"],
-                    "expectedRiskRecall": expected_recall,
+                    # ground-truth match semantics
+                    "expectedRiskConceptRecall": match["expectedRiskConceptRecall"],
+                    "expectedSourceDocumentMatchRate": match["expectedSourceDocumentMatchRate"],
+                    "expectedCitationFamilyMatchRate": match["expectedCitationFamilyMatchRate"],
+                    "expectedCitationExactMatchRate": match["expectedCitationExactMatchRate"],
+                    # full-mode structural gate
+                    "deterministicStructuralScore": tel["deterministicStructuralScore"],
+                    "candidateStructuralScore": tel["candidateStructuralScore"],
+                    "finalStructuralScore": tel["finalStructuralScore"],
+                    "structuralGateDecision": tel["structuralGateDecision"],
+                    "acceptedStructuralComponents": tel["acceptedStructuralComponents"],
+                    "rejectedStructuralComponents": tel["rejectedStructuralComponents"],
+                    "acceptedStructuralComponentCount": len(tel["acceptedStructuralComponents"]),
+                    "rejectedStructuralComponentCount": len(tel["rejectedStructuralComponents"]),
+                    "acceptedRiskCount": tel["acceptedRiskCount"],
+                    "rejectedRiskCount": tel["rejectedRiskCount"],
+                    "acceptedWorkflowStepCount": tel["acceptedWorkflowStepCount"],
+                    "rejectedWorkflowStepCount": tel["rejectedWorkflowStepCount"],
+                    "structuralRejectionReasons": tel["structuralRejectionReasons"],
+                    "fullModeAnalyticalFallback": tel["fullModeAnalyticalFallback"],
                     # deltas vs deterministic baseline
                     "overallDeltaVsDeterministic": round(quality["overallQualityScore"] - base_overall, 1),
                     "narrativeDeltaVsDeterministic": round(quality["narrativeUtilityScore"] - base_narrative, 1),
@@ -157,6 +196,11 @@ def run_benchmark(
                 }
             )
     return results
+
+
+def _mean_opt(rows: List[Dict[str, Any]], key: str) -> Optional[float]:
+    vals = [x[key] for x in rows if x.get(key) is not None]
+    return round(mean(vals), 3) if vals else None
 
 
 def _repl(rows: List[Dict[str, Any]]) -> int:
@@ -223,12 +267,94 @@ def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "minEvidenceSupportScore": round(
                 min([x["evidenceSupportScoreMin"] for x in rows if x["groundedRisksKept"] > 0]), 3
             ) if any(x["groundedRisksKept"] > 0 for x in rows) else 0.0,
-            "avgExpectedRiskRecall": round(
-                mean([x["expectedRiskRecall"] for x in rows if x["expectedRiskRecall"] is not None]), 3
-            ) if any(x["expectedRiskRecall"] is not None for x in rows) else None,
+            # ground-truth match semantics (means over scenarios that carry each)
+            "avgExpectedRiskConceptRecall": _mean_opt(rows, "expectedRiskConceptRecall"),
+            "avgExpectedSourceDocumentMatchRate": _mean_opt(rows, "expectedSourceDocumentMatchRate"),
+            "avgExpectedCitationFamilyMatchRate": _mean_opt(rows, "expectedCitationFamilyMatchRate"),
+            "avgExpectedCitationExactMatchRate": _mean_opt(rows, "expectedCitationExactMatchRate"),
+            # full-mode structural gate
+            "avgDeterministicStructuralScore": round(mean(x["deterministicStructuralScore"] for x in rows), 2),
+            "avgCandidateStructuralScore": round(mean(x["candidateStructuralScore"] for x in rows), 2),
+            "avgFinalStructuralScore": round(mean(x["finalStructuralScore"] for x in rows), 2),
+            "structuralRegressionsBeforeGate": sum(
+                1 for x in rows if x["candidateStructuralScore"] < x["deterministicStructuralScore"]
+            ),
+            "structuralRegressionsAfterGate": sum(
+                1 for x in rows if x["finalStructuralScore"] < x["deterministicStructuralScore"]
+            ),
+            "acceptedStructuralComponents": sum(x["acceptedStructuralComponentCount"] for x in rows),
+            "rejectedStructuralComponents": sum(x["rejectedStructuralComponentCount"] for x in rows),
+            "acceptedRiskCount": sum(x["acceptedRiskCount"] for x in rows),
+            "rejectedRiskCount": sum(x["rejectedRiskCount"] for x in rows),
+            "acceptedWorkflowStepCount": sum(x["acceptedWorkflowStepCount"] for x in rows),
+            "rejectedWorkflowStepCount": sum(x["rejectedWorkflowStepCount"] for x in rows),
+            "fullModeAnalyticalFallbacks": sum(1 for x in rows if x["fullModeAnalyticalFallback"]),
+            # mean/std for quality, latency, cost
+            "overallQualityStd": round(pstdev([x["overallQualityScore"] for x in rows]), 2) if len(rows) > 1 else 0.0,
+            "latencyMsStd": round(pstdev([x["latencyMs"] for x in rows]), 1) if len(rows) > 1 else 0.0,
+            "estimatedCostStd": round(pstdev([x["estimatedCostUsd"] for x in rows]), 6) if len(rows) > 1 else 0.0,
             "avgLatencyMs": round(mean(x["latencyMs"] for x in rows), 1),
             "totalLlmCalls": sum(x["llmCalls"] for x in rows),
             "totalTokens": sum(x["inputTokens"] + x["outputTokens"] for x in rows),
             "totalEstimatedCostUsd": round(sum(x["estimatedCostUsd"] for x in rows), 6),
         }
     return summary
+
+
+def _key(row: Dict[str, Any]) -> Tuple[Any, Any]:
+    return (row["scenarioId"], row["runIndex"])
+
+
+def _wtl(rows_a: Dict[Tuple, Dict], rows_b: Dict[Tuple, Dict], eps: float = 0.05) -> Dict[str, int]:
+    win = tie = loss = 0
+    for k, a in rows_a.items():
+        b = rows_b.get(k)
+        if not b:
+            continue
+        d = a["overallQualityScore"] - b["overallQualityScore"]
+        if d > eps:
+            win += 1
+        elif d < -eps:
+            loss += 1
+        else:
+            tie += 1
+    return {"win": win, "tie": tie, "loss": loss}
+
+
+def compare_modes(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Cross-mode analysis: win/tie/loss, incremental gain, cost per accepted
+    analytical improvement, and     structural regressions."""
+    by_mode: Dict[str, Dict[Tuple, Dict]] = {}
+    for r in results:
+        by_mode.setdefault(r["requestedMode"], {})[_key(r)] = r
+
+    out: Dict[str, Any] = {}
+
+    def mean_overall(mode: str) -> Optional[float]:
+        rows = list(by_mode.get(mode, {}).values())
+        return round(mean(x["overallQualityScore"] for x in rows), 2) if rows else None
+
+    if "full" in by_mode and "deterministic" in by_mode:
+        out["fullVsDeterministic"] = _wtl(by_mode["full"], by_mode["deterministic"])
+    if "full" in by_mode and "summary" in by_mode:
+        out["fullVsSummary"] = _wtl(by_mode["full"], by_mode["summary"])
+        fm, sm = mean_overall("full"), mean_overall("summary")
+        out["fullIncrementalGainVsSummary"] = round(fm - sm, 2) if (fm is not None and sm is not None) else None
+
+    if "full" in by_mode:
+        full_rows = list(by_mode["full"].values())
+        accepted = sum(x["acceptedStructuralComponentCount"] for x in full_rows)
+        accepted_items = sum(x["acceptedRiskCount"] + x["acceptedWorkflowStepCount"] for x in full_rows)
+        full_cost = round(sum(x["estimatedCostUsd"] for x in full_rows), 6)
+        out["fullStructuralRegressionsBeforeGate"] = sum(
+            1 for x in full_rows if x["candidateStructuralScore"] < x["deterministicStructuralScore"]
+        )
+        out["fullStructuralRegressionsAfterGate"] = sum(
+            1 for x in full_rows if x["finalStructuralScore"] < x["deterministicStructuralScore"]
+        )
+        out["fullAcceptedStructuralComponents"] = accepted
+        out["fullAcceptedAnalyticalItems"] = accepted_items
+        out["fullTotalCostUsd"] = full_cost
+        out["costPerAcceptedComponentUsd"] = round(full_cost / accepted, 6) if accepted else None
+        out["costPerAcceptedItemUsd"] = round(full_cost / accepted_items, 6) if accepted_items else None
+    return out

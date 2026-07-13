@@ -16,9 +16,20 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from app.agents.document_reader import document_reader
+from app.agents.document_reader import DOCUMENTS, document_reader
 from app.tools.citation_tools import INSUFFICIENT_EVIDENCE
 from app.tools.text_quality import VAGUE_PHRASES, is_precise_text
+
+# citation prefix (family) -> owning source document id.
+_PREFIX_TO_DOC = {d["citationPrefix"]: d["id"] for d in DOCUMENTS}
+
+
+def _code_family(code: str) -> str:
+    return code.split("-")[0] if code and "-" in code else code
+
+
+def _code_document(code: str) -> Optional[str]:
+    return _PREFIX_TO_DOC.get(_code_family(code))
 
 # --------------------------------------------------------------------------- #
 # shared constants
@@ -402,6 +413,58 @@ def narrative_score(report: Dict[str, Any], available: Set[str], custom_persona:
         "action_alignment": action_alignment(report, expected),
         "penalties": npen,
     })
+
+
+# --------------------------------------------------------------------------- #
+# ground-truth risk / evidence match semantics
+# --------------------------------------------------------------------------- #
+
+def expected_match_metrics(report: Dict[str, Any], expected: Optional[Dict] = None) -> Dict[str, Any]:
+    """Distinguish concept / document / family / exact expected-citation matches.
+
+    - expectedRiskConceptRecall     — expected risk *concepts* present in risk text
+      (correct risk claim, regardless of which citation grounds it).
+    - expectedSourceDocumentMatchRate — expected codes whose owning *document* is
+      cited (correct risk + correct document, possibly a different valid section).
+    - expectedCitationFamilyMatchRate — expected codes whose family (prefix) is cited.
+    - expectedCitationExactMatchRate  — expected codes matched exactly.
+
+    Exact ⊆ family; document is resolved independently via the prefix→doc map so a
+    wrong-document/right-concept case scores concept-only. Each metric is None when
+    the scenario carries no corresponding ground truth.
+    """
+    expected = expected or {}
+    risk_codes = {r.get("evidenceCode", "") for r in report.get("risks", [])}
+    risk_codes = {c for c in risk_codes if c and c != INSUFFICIENT_EVIDENCE}
+    report_families = {_code_family(c) for c in risk_codes}
+    report_docs = {_code_document(c) for c in risk_codes if _code_document(c)}
+
+    expected_codes = [c for c in expected.get("evidenceCodes", []) if c]
+    if expected_codes:
+        exact = sum(1 for c in expected_codes if c in risk_codes) / len(expected_codes)
+        family = sum(1 for c in expected_codes if _code_family(c) in report_families) / len(expected_codes)
+        document = sum(1 for c in expected_codes if _code_document(c) in report_docs) / len(expected_codes)
+    else:
+        exact = family = document = None
+
+    # Expected risk concepts: dedicated field if present, else summary concepts.
+    concepts = [c.lower() for c in (expected.get("riskConcepts") or expected.get("summaryConcepts") or [])]
+    if concepts:
+        risk_text = " ".join(
+            f"{r.get('title', '')} {r.get('description', '')}" for r in report.get("risks", [])
+        ).lower()
+        risk_tokens = _tokens(risk_text)
+        hit = sum(1 for c in concepts if c in risk_text or (_tokens(c) & risk_tokens))
+        concept_recall = hit / len(concepts)
+    else:
+        concept_recall = None
+
+    return {
+        "expectedRiskConceptRecall": round(concept_recall, 3) if concept_recall is not None else None,
+        "expectedSourceDocumentMatchRate": round(document, 3) if document is not None else None,
+        "expectedCitationFamilyMatchRate": round(family, 3) if family is not None else None,
+        "expectedCitationExactMatchRate": round(exact, 3) if exact is not None else None,
+    }
 
 
 # --------------------------------------------------------------------------- #

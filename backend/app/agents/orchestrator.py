@@ -28,6 +28,7 @@ from app.tools.text_quality import is_precise_text
 from .citation_binder import citation_binder
 from .mode_router import RoutingSignals, route_intensity
 from .narrative_gate import gate_fields
+from .structural_gate import default_structural_telemetry, reconcile_and_gate
 from .document_reader import document_reader
 from .metrics_agent import metrics_agent
 from .persona_mapper import persona_mapper, resolve_persona_key
@@ -419,11 +420,17 @@ def run_pipeline_ex(
     persona_changed = False
     actions_accepted = 0
     llm_fallback = False
+    structural_info = default_structural_telemetry()
 
     if resolved == "full":
         try:
-            r1, persona_brief, workflow_steps = _llm_persona_workflow(
-                market, persona, custom_persona, sections, persona_brief, workflow_steps,
+            # Preserve the complete deterministic analytical baseline; build the
+            # LLM output as a *separate* candidate and never mutate the baseline
+            # until the structural gate accepts it.
+            det_persona, det_workflow, det_risks = persona_brief, workflow_steps, risks
+
+            r1, cand_persona, cand_workflow = _llm_persona_workflow(
+                market, persona, custom_persona, sections, det_persona, det_workflow,
                 settings.evidentia_max_output_tokens,
             )
             llm_calls += 1 if r1.called else 0
@@ -431,14 +438,43 @@ def run_pipeline_ex(
             input_tokens += r1.input_tokens
             output_tokens += r1.output_tokens
 
-            r2, risks = _llm_risks(market, persona_brief, sections, risks, settings.evidentia_max_output_tokens)
+            r2, cand_risks = _llm_risks(
+                market, cand_persona, sections, det_risks, settings.evidentia_max_output_tokens
+            )
             llm_calls += 1 if r2.called else 0
             context_chars += r2.input_chars
             input_tokens += r2.input_tokens
             output_tokens += r2.output_tokens
-            citations = citation_binder(sections, workflow_steps, risks)  # re-bind grounded evidence
+
+            def _compose(pb: Dict[str, Any], wf: List[Dict[str, Any]], rk: List[Dict[str, Any]]) -> Dict[str, Any]:
+                c = citation_binder(sections, wf, rk)
+                m = metrics_agent(documents, sections, c, rk, wf, market, persona_key, pb["title"])
+                ag = build_agent_steps(documents, sections, rk, c, wf, pb["title"])
+                return report_composer(
+                    report_id=report_id, market=market, persona=persona, custom_persona=custom_persona,
+                    persona_key=persona_key, persona_brief=pb, documents=documents, sections=sections,
+                    workflow_steps=wf, risks=rk, citations=c, metrics=m, agent_steps=ag,
+                    generated_at=generated_at,
+                )
+
+            gated = reconcile_and_gate(
+                det={"personaBrief": det_persona, "workflowSteps": det_workflow, "risks": det_risks},
+                cand={"personaBrief": cand_persona, "workflowSteps": cand_workflow, "risks": cand_risks},
+                ctx={
+                    "sections": sections, "available": available_ids, "persona_key": persona_key,
+                    "market": market, "custom": custom_persona, "contradictions": contradictions,
+                },
+                compose_fn=_compose,
+            )
+            persona_brief = gated["personaBrief"]
+            workflow_steps = gated["workflowSteps"]
+            risks = gated["risks"]
+            structural_info = gated["telemetry"]
+            citations = citation_binder(sections, workflow_steps, risks)  # re-bind accepted evidence
         except Exception:  # noqa: BLE001
             resolved = "off"  # unexpected failure → deterministic
+            structural_info = default_structural_telemetry()
+            structural_info["fullModeAnalyticalFallback"] = True
 
     # --- deterministic grounding repair (both paths, before assembly) ---
     repair_info = repair_grounding(
@@ -526,6 +562,7 @@ def run_pipeline_ex(
         summary_changed=summary_changed, persona_changed=persona_changed,
         actions_accepted=actions_accepted, llm_fallback=llm_fallback,
         gate=gate_info, repair=repair_info, generation=generation_info,
+        structural=structural_info,
     )
     return report, telemetry
 
@@ -537,7 +574,7 @@ def _telemetry(
     summary_changed: bool = False, persona_changed: bool = False,
     actions_accepted: int = 0, llm_fallback: bool = False,
     gate: Optional[Dict[str, Any]] = None, repair: Optional[Dict[str, int]] = None,
-    generation: Optional[Dict[str, Any]] = None,
+    generation: Optional[Dict[str, Any]] = None, structural: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     import time
 
@@ -545,6 +582,7 @@ def _telemetry(
     gate = gate or {}
     repair = repair or {}
     generation = generation or {}
+    structural = structural or default_structural_telemetry()
     return {
         "intensityConfigured": configured,
         "intensityResolved": resolved,
@@ -592,4 +630,17 @@ def _telemetry(
         "evidenceSupportScoreAvg": generation.get("evidenceSupportScoreAvg", 0.0),
         "evidenceSupportScoreMin": generation.get("evidenceSupportScoreMin", 0.0),
         "generationAudit": generation.get("generationAudit", []),
+        # full-mode structural gate
+        "deterministicStructuralScore": structural["deterministicStructuralScore"],
+        "candidateStructuralScore": structural["candidateStructuralScore"],
+        "finalStructuralScore": structural["finalStructuralScore"],
+        "structuralGateDecision": structural["structuralGateDecision"],
+        "acceptedStructuralComponents": structural["acceptedStructuralComponents"],
+        "rejectedStructuralComponents": structural["rejectedStructuralComponents"],
+        "acceptedRiskCount": structural["acceptedRiskCount"],
+        "rejectedRiskCount": structural["rejectedRiskCount"],
+        "acceptedWorkflowStepCount": structural["acceptedWorkflowStepCount"],
+        "rejectedWorkflowStepCount": structural["rejectedWorkflowStepCount"],
+        "structuralRejectionReasons": structural["structuralRejectionReasons"],
+        "fullModeAnalyticalFallback": structural["fullModeAnalyticalFallback"],
     }
