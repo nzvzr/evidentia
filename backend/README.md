@@ -185,6 +185,29 @@ version, cache status, and change telemetry (`reportChanged`, whether the summar
 / persona brief changed, number of accepted LLM actions, and whether the LLM
 response fell back entirely).
 
+### Calibration safeguards
+
+- **Deterministic grounding repair** runs before report assembly (both deterministic
+  and LLM paths): every workflow/risk `evidenceCode` is validated against the
+  citation IDs of the selected documents; invalid codes are replaced with a
+  semantically relevant valid citation, or marked `N/A` (insufficient evidence)
+  rather than inventing a code. Citations are re-bound afterward. The benchmark
+  reports `ungroundedBeforeRepair` / `ungroundedAfterRepair` (per scenario and
+  summed per mode).
+- **Field-level narrative gate**: LLM polish is applied per field (summary,
+  persona-brief description, suggested actions). A candidate field is accepted only
+  if its field-level narrative score is *strictly* better AND factual consistency
+  does not drop AND grounding does not drop AND hallucination/injection warnings do
+  not increase; ties preserve the deterministic field. Telemetry: `acceptedFields`,
+  `rejectedFields`, `rejectionReasons`, `deterministicNarrativeScore`,
+  `candidateNarrativeScore`, `finalNarrativeScore`, `narrativeGateDecision`. The
+  benchmark reports narrative regressions before vs after the gate and the field
+  acceptance rate.
+
+Exported narrative sub-metrics: `summaryFactualConsistency`, `summaryCompleteness`,
+`summaryConcision`, `personaMarketRelevance`, `actionUsefulness`,
+`actionEvidenceAlignment`, `vagueLanguagePenalty`, `repetitionPenalty`.
+
 Run it and export JSON + CSV:
 
 ```bash
