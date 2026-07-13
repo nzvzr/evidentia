@@ -17,6 +17,7 @@ import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.agents.document_reader import document_reader
+from app.tools.citation_tools import INSUFFICIENT_EVIDENCE
 from app.tools.text_quality import VAGUE_PHRASES, is_precise_text
 
 # --------------------------------------------------------------------------- #
@@ -165,9 +166,9 @@ def _evidence_refs(report: Dict[str, Any]) -> List[str]:
 
 
 def citation_accuracy(report: Dict[str, Any], available: Set[str]) -> float:
-    refs = [r for r in _evidence_refs(report) if r]
+    refs = [r for r in _evidence_refs(report) if r and r != INSUFFICIENT_EVIDENCE]
     if not refs:
-        return 0.0
+        return 1.0  # nothing claimed → nothing inaccurate (insufficient evidence is honest)
     return sum(1 for r in refs if r in available) / len(refs)
 
 
@@ -183,7 +184,7 @@ def hallucination_warnings(
 ) -> Tuple[int, List[str]]:
     warns: List[str] = []
     for ref in _evidence_refs(report):
-        if ref and ref not in available:
+        if ref and ref != INSUFFICIENT_EVIDENCE and ref not in available:
             warns.append(f"ungrounded-evidence:{ref}")
     for c in report.get("citations", []):
         if c.get("id") not in available:
@@ -387,6 +388,20 @@ def overall_quality_score(grounding: float, narrative: float) -> float:
     return round(OVERALL_GROUNDING_WEIGHT * grounding + OVERALL_NARRATIVE_WEIGHT * narrative, 1)
 
 
+def narrative_score(report: Dict[str, Any], available: Set[str], custom_persona: str = "", expected: Optional[Dict] = None) -> float:
+    """Overall narrativeUtilityScore for a report (used by the field gate)."""
+    npen, _ = narrative_penalties(report, custom_persona)
+    return narrative_utility_score({
+        "factual_consistency": summary_factual_consistency(report, available, expected),
+        "completeness": summary_completeness(report, expected),
+        "concision": concision(report),
+        "persona_market_relevance": persona_market_relevance(report),
+        "action_usefulness": action_usefulness(report),
+        "action_alignment": action_alignment(report, expected),
+        "penalties": npen,
+    })
+
+
 # --------------------------------------------------------------------------- #
 # top-level
 # --------------------------------------------------------------------------- #
@@ -423,6 +438,8 @@ def evaluate_report(
     })
 
     overall = overall_quality_score(grounding, narrative)
+    vague_penalty = 1 if "vague-language" in nwarns else 0
+    repetition_penalty = 1 if "repetitive" in nwarns else 0
 
     return {
         # scores
@@ -437,12 +454,14 @@ def evaluate_report(
         "citationCoverage": round(cc, 3),
         "hallucinationWarnings": hcount,
         "hallucinationDetail": hwarn,
-        # narrative detail
-        "factualConsistency": round(fc, 3),
+        # narrative sub-metrics (exported)
+        "summaryFactualConsistency": round(fc, 3),
         "summaryCompleteness": round(comp, 3),
-        "concision": round(con, 3),
+        "summaryConcision": round(con, 3),
         "personaMarketRelevance": round(pmr, 3),
         "actionUsefulness": round(au, 3),
-        "actionAlignment": round(aa, 3),
+        "actionEvidenceAlignment": round(aa, 3),
+        "vagueLanguagePenalty": vague_penalty,
+        "repetitionPenalty": repetition_penalty,
         "narrativeWarnings": nwarns,
     }

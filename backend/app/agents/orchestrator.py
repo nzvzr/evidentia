@@ -21,11 +21,13 @@ from app.core.config import get_settings
 from app.services.llm import LLMCallResult, generate_structured_object
 from app.tools.document_search import rank_sections_for_persona, summarize_sections
 from app.tools.evidence_pack import build_evidence_pack, pack_to_text
+from app.tools.citation_tools import repair_grounding
 from app.tools.risk_tools import detect_contradictions
 from app.tools.text_quality import is_precise_text
 
 from .citation_binder import citation_binder
 from .mode_router import RoutingSignals, route_intensity
+from .narrative_gate import gate_fields
 from .document_reader import document_reader
 from .metrics_agent import metrics_agent
 from .persona_mapper import persona_mapper, resolve_persona_key
@@ -370,6 +372,7 @@ def run_pipeline_ex(
         documents, sections, citations, risks, workflow_steps, market, persona_key, persona_brief["title"]
     )
     contradictions = detect_contradictions(sections, market)
+    available_ids = {s["citationId"] for s in sections}
 
     # --- resolve intensity (auto routing) ---
     if configured == "auto":
@@ -435,6 +438,10 @@ def run_pipeline_ex(
         except Exception:  # noqa: BLE001
             resolved = "off"  # unexpected failure → deterministic
 
+    # --- deterministic grounding repair (both paths, before assembly) ---
+    repair_info = repair_grounding(workflow_steps, risks, sections)
+    citations = citation_binder(sections, workflow_steps, risks)  # re-bind after repair
+
     # --- metrics + report assembly (deterministic) ---
     metrics = metrics_agent(
         documents, sections, citations, risks, workflow_steps, market, persona_key, persona_brief["title"]
@@ -447,10 +454,13 @@ def run_pipeline_ex(
         agent_steps=agent_steps, generated_at=generated_at,
     )
 
-    # --- narrative polish (summary + full share one final call) ---
+    # --- narrative polish + field-level quality gate (summary + full) ---
+    gate_info: Dict[str, Any] = {
+        "acceptedFields": [], "rejectedFields": [], "rejectionReasons": {},
+        "deterministicNarrativeScore": 0.0, "candidateNarrativeScore": 0.0,
+        "finalNarrativeScore": 0.0, "narrativeGateDecision": "no-updates",
+    }
     if resolved in ("summary", "full"):
-        base_summary = report["summary"]
-        base_desc = report["personaBrief"]["description"]
         try:
             max_tokens = 500 if resolved == "summary" else settings.evidentia_max_output_tokens
             r_polish, updates = _llm_report_polish(report, sections, max_tokens)
@@ -458,17 +468,15 @@ def run_pipeline_ex(
             context_chars += r_polish.input_chars
             input_tokens += r_polish.input_tokens
             output_tokens += r_polish.output_tokens
-            if "summary" in updates:
-                report["summary"] = updates["summary"]
-                summary_changed = updates["summary"] != base_summary
-            # topFinding is intentionally kept deterministic (clean + executive).
-            if "personaBriefDescription" in updates:
-                report["personaBrief"]["description"] = updates["personaBriefDescription"]
-                persona_changed = updates["personaBriefDescription"] != base_desc
-            if "suggestedActions" in updates:
-                report["suggestedActions"] = updates["suggestedActions"]
-                actions_accepted = len(updates["suggestedActions"])
-            llm_fallback = not updates
+            # topFinding stays deterministic; the gate accepts summary / persona
+            # description / actions only when they strictly improve without regressing.
+            gate_info = gate_fields(report, updates, available_ids, custom_persona)
+            summary_changed = "summary" in gate_info["acceptedFields"]
+            persona_changed = "personaBrief.description" in gate_info["acceptedFields"]
+            actions_accepted = (
+                len(report["suggestedActions"]) if "suggestedActions" in gate_info["acceptedFields"] else 0
+            )
+            llm_fallback = not gate_info["acceptedFields"]
         except Exception:  # noqa: BLE001
             llm_fallback = True
 
@@ -497,6 +505,7 @@ def run_pipeline_ex(
         contradictions, base_metrics["confidence"],
         summary_changed=summary_changed, persona_changed=persona_changed,
         actions_accepted=actions_accepted, llm_fallback=llm_fallback,
+        gate=gate_info, repair=repair_info,
     )
     return report, telemetry
 
@@ -507,10 +516,13 @@ def _telemetry(
     contradictions, deterministic_confidence,
     summary_changed: bool = False, persona_changed: bool = False,
     actions_accepted: int = 0, llm_fallback: bool = False,
+    gate: Optional[Dict[str, Any]] = None, repair: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     import time
 
     used_llm = resolved in ("summary", "full")
+    gate = gate or {}
+    repair = repair or {}
     return {
         "intensityConfigured": configured,
         "intensityResolved": resolved,
@@ -533,4 +545,16 @@ def _telemetry(
             "suggestedActionsAccepted": actions_accepted,
             "llmFallback": llm_fallback,
         },
+        # field-level narrative gate
+        "acceptedFields": gate.get("acceptedFields", []),
+        "rejectedFields": gate.get("rejectedFields", []),
+        "rejectionReasons": gate.get("rejectionReasons", {}),
+        "deterministicNarrativeScore": gate.get("deterministicNarrativeScore", 0.0),
+        "candidateNarrativeScore": gate.get("candidateNarrativeScore", 0.0),
+        "finalNarrativeScore": gate.get("finalNarrativeScore", 0.0),
+        "narrativeGateDecision": gate.get("narrativeGateDecision", "no-updates"),
+        # deterministic grounding repair
+        "ungroundedBeforeRepair": repair.get("before", 0),
+        "ungroundedAfterRepair": repair.get("after", 0),
+        "evidenceRepairs": repair.get("repairs", 0),
     }
