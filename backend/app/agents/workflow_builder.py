@@ -1,8 +1,12 @@
-"""Workflow Builder agent — 4-6 persona/market-aware steps bound to evidence."""
+"""Workflow Builder agent — 4-6 persona/market-aware steps, each grounded to a
+selected source section (or converted to an explicit evidence-gap step)."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
+
+from app.tools.citation_tools import INSUFFICIENT_EVIDENCE
+from app.tools.evidence_support import tokens
 
 _TEMPLATES: Dict[str, List[Dict[str, str]]] = {
     "support": [
@@ -57,28 +61,76 @@ _TEMPLATES: Dict[str, List[Dict[str, str]]] = {
 }
 
 
-def _pick_evidence(sections: List[Dict[str, Any]], prefer: str, fallback_index: int) -> str:
+def _ground_step(t: Dict[str, str], sections: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Ground a step to a selected section: preferred-prefix first, then topical
+    overlap, else an explicit evidence gap. Returns evidence code + provenance."""
+    prefer = t["prefer"]
+    preferred = [s for s in sections if s["citationId"].startswith(prefer)]
+    if preferred:
+        s = preferred[0]
+        return {"code": s["citationId"], "documentId": s.get("documentId"),
+                "reason": "preferred-source", "matched": [], "grounded": True}
+
+    needles = tokens(f"{t['title']} {t['description']}")
+    best = None
+    best_overlap: set[str] = set()
     for s in sections:
-        if s["citationId"].startswith(prefer):
-            return s["citationId"]
-    if sections:
-        return sections[fallback_index % len(sections)]["citationId"]
-    return f"{prefer}-1"
+        overlap = needles & tokens(f"{s['sectionTitle']} {s['excerpt']}")
+        if len(overlap) > len(best_overlap):
+            best_overlap = overlap
+            best = s
+    if best and len(best_overlap) >= 1:
+        return {"code": best["citationId"], "documentId": best.get("documentId"),
+                "reason": "topical-match", "matched": sorted(best_overlap), "grounded": True}
+
+    return {"code": INSUFFICIENT_EVIDENCE, "documentId": None,
+            "reason": "evidence-gap", "matched": [], "grounded": False}
 
 
-def workflow_builder(persona_key: str, market: str, sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def workflow_builder(
+    persona_key: str, market: str, sections: List[Dict[str, Any]]
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     templates = _TEMPLATES.get(persona_key, _TEMPLATES["support"])
-    count = min(6, max(4, 5 if len(sections) >= 12 else 5))
+    count = min(6, max(4, 5))
     steps: List[Dict[str, Any]] = []
+    provenance: List[Dict[str, Any]] = []
+    audit: List[Dict[str, Any]] = []
+    grounded = 0
+    unsupported = 0
+
     for i, t in enumerate(templates[:count]):
-        steps.append(
-            {
-                "step": i + 1,
-                "title": t["title"],
-                "description": t["description"],
-                "whyItMatters": t["whyItMatters"],
-                "expectedOutput": t["expectedOutput"],
-                "evidenceCode": _pick_evidence(sections, t["prefer"], i),
-            }
-        )
-    return steps
+        g = _ground_step(t, sections)
+        steps.append({
+            "step": i + 1,
+            "title": t["title"],
+            "description": t["description"],
+            "whyItMatters": t["whyItMatters"],
+            "expectedOutput": t["expectedOutput"],
+            "evidenceCode": g["code"],
+        })
+        provenance.append({
+            "sourceDocumentId": g["documentId"],
+            "sourceCitationId": g["code"],
+            "matchedSignals": g["matched"],
+            "generationReason": g["reason"],
+        })
+        if g["grounded"]:
+            grounded += 1
+        else:
+            unsupported += 1
+            audit.append({
+                "itemType": "workflow", "title": t["title"], "proposedRiskOrStep": t["title"],
+                "proposedSourceDocumentId": None, "proposedCitationId": INSUFFICIENT_EVIDENCE,
+                "supportScore": 0.0, "rejectionReason": "no-supporting-section",
+                "finalDecision": "evidence-gap",
+            })
+
+    gen_info = {
+        "generatedBeforeFiltering": len(templates[:count]),
+        "groundedKept": grounded,
+        "unsupportedDropped": unsupported,
+        "sourceDocumentMismatch": 0,
+        "provenance": provenance,
+        "audit": audit,
+    }
+    return steps, gen_info

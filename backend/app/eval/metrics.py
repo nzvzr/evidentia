@@ -150,9 +150,11 @@ def validate_schema(report: Dict[str, Any]) -> Tuple[bool, List[str]]:
     for k in REQUIRED_METRIC_KEYS:
         if k not in metrics:
             issues.append(f"metrics.{k}")
-    if not 4 <= len(report.get("workflowSteps", [])) <= 6:
+    # Source-constrained generation may legitimately yield fewer risks/steps than
+    # the old fixed minimums; only flag counts that exceed the supported maximum.
+    if not 1 <= len(report.get("workflowSteps", [])) <= 6:
         issues.append("workflow.count")
-    if not 3 <= len(report.get("risks", [])) <= 5:
+    if len(report.get("risks", [])) > 6:
         issues.append("risk.count")
     seen: Set[str] = set()
     unique = [i for i in issues if not (i in seen or seen.add(i))]

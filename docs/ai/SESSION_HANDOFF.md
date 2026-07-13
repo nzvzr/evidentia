@@ -1,56 +1,73 @@
 # Evidentia — Session Handoff
 
 _Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-13._
+_Last updated: 2026-07-13 (source-constrained generation)._
 
 ## Where things stand
 
 Backend calibration is complete and green. Pipeline is deterministic-first with
 optional LLM refinement (off/summary/full/auto), a field-level narrative quality
-gate, and a hardened deterministic grounding-repair stage. Evaluation splits
-`groundingScore` and `narrativeUtilityScore`.
+gate, **source-constrained (evidence-first) risk/workflow generation**, and a
+deterministic grounding-repair stage. Evaluation splits `groundingScore` and
+`narrativeUtilityScore`.
 
-- **44 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
+- **53 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
 - Benchmarked model: **gpt-4o-mini**. App works with no key (deterministic).
 
-## Just completed — grounding-repair hardening
+## Just completed — source-constrained generation (upstream fix)
 
-- Replaced one-token-overlap with an **IDF-weighted relevance scorer**
-  (`backend/app/tools/citation_tools.py`): generic-term downweighting, exact
-  multi-word phrase bonus, section-title > excerpt weighting, configurable
-  `EVIDENTIA_REPAIR_MIN_RELEVANCE` (default 2.0), and a ≥2-meaningful-terms rule
-  unless a strong phrase matches.
-- Below threshold → `N/A` (insufficient evidence); never the least-bad citation.
-- Per-repair **audit** (matched terms/phrases, relevance score, top-3 candidates,
-  decision) in telemetry → benchmark JSON + a `*.audit.csv`; never in the public report.
-- Benchmark now reports `validReplacementRate`, `expectedEvidenceMatchRate`,
-  `insufficientEvidenceRate`, `lowConfidenceRepairRate`, `averageRepairRelevanceScore`.
-- `scripts/run_benchmark.py --print-repairs` prints each repair + ground-truth match.
+Root cause of the 29 `N/A` markers: `risk_analyzer` generated generic risks and
+attached evidence afterward, so many risks had no supporting selected document.
+Now generation is evidence-first:
 
-## Verified results (keyless deterministic benchmark, v1)
+- New **evidence-support scorer** (`backend/app/tools/evidence_support.py`),
+  separate from repair: selected-document ownership, risk/workflow vocabulary,
+  exact domain phrases, category affinity, persona/market relevance, negation.
+- `risk_analyzer` (rewritten) proposes risks per persona/market, then only emits
+  ones whose *owned* source section clears `EVIDENTIA_MIN_EVIDENCE_SUPPORT` (≥2
+  signals or a phrase). No filler to hit a count; one explicit evidence-gap risk
+  only when the missing docs are operationally relevant. Returns `(risks, gen_info)`
+  with internal provenance + drop/transform audit.
+- `workflow_builder` grounds each step to a preferred/topical section or converts
+  it to an evidence-gap step; returns `(steps, gen_info)`.
+- Provenance (`sourceDocumentId`, `sourceCitationId`, `matchedSignals`,
+  `generationReason`) lives in telemetry only, never the public report.
+- New telemetry: `risksGeneratedBeforeFiltering`, `groundedRisksKept`,
+  `unsupportedRisksDropped`, workflow equivalents, `insufficientEvidenceItemsFinal`,
+  `sourceDocumentMismatchCount`, `evidenceSupportScore` avg/min, `expectedRiskRecall`.
+- New `*.gen-audit.csv` + `scripts/run_benchmark.py --print-generation`.
+- `metrics.validate_schema` relaxed (risks ≤6, workflow 1–6) — backward compatible.
 
-- overall 94.2 / narrative 94.6 / schema-valid 1.0.
-- Repair: 31 ungrounded → 0; **2 replaced** (avg relevance 8.615), **29 insufficient**
-  (rate 0.935); validReplacementRate 1.0; expectedEvidenceMatchRate 0.0.
+## Verified results (v1, gpt-4o-mini)
+
+| mode | overall | grounding | narrative |
+|------|---------|-----------|-----------|
+| deterministic | 93.8 | 93.9 | 93.8 |
+| summary | 95.0 | 93.9 | 96.1 |
+
+- Insufficient before → after: **repair had 31 invalid codes → now 0**
+  (`ungroundedBeforeRepair = 0`, `repairInsufficient = 0`). 80 risks proposed →
+  44 grounded, **36 unsupported dropped at source**; 27 deliberate evidence-gap items.
+- Expected-risk recall **0.833**; citation accuracy 1.0; schema-valid 1.0;
+  0 hallucination warnings; summary cost $0.0076.
 
 ## Open concerns / next steps
 
-1. **Repaired-citation relevance is lexical, not semantic.** Residual cross-topic
-   matches remain when two meaningful terms coincide (audit surfaces them, e.g.
-   rollback risk → pricing "Plan Tiers" via `deployment`,`plan`). Next: category/
-   persona-aware affinity bonus or embeddings (no LLM). Add a test asserting the
-   chosen citation's category matches the item's topic.
-2. **Most `insufficient` markers come from `risk_analyzer`** selecting risks whose
-   source document isn't in the selected corpus. Consider filtering those risks so
-   repair has a groundable citation, reducing the 29 insufficient markers.
-3. Live gate/regression reporting only fully exercises with an API key set.
+1. **Matching is lexical, not semantic** (support + repair scorers). Next:
+   category/persona affinity refinement or embeddings (no LLM).
+2. **Expected-risk recall 0.833**: risks bind to the highest-signal section in the
+   right document, which may differ from the ground-truth section id. Consider
+   prefix-level ground truth if exact recall is needed.
+3. Full-mode LLM risk refinement can still add risks the deterministic scorer
+   didn't ground; generation telemetry reflects the deterministic pass. Summary
+   (default) and deterministic paths are fully source-constrained.
 
 ## How to verify
 
 ```bash
 cd backend && source .venv/bin/activate
-python -m pytest -q                       # expect 44 passed
-python scripts/run_benchmark.py --modes deterministic,summary,full,auto --print-repairs
+python -m pytest -q                       # expect 53 passed
+python scripts/run_benchmark.py --modes deterministic,summary --print-generation
 # frontend: npm run build
 ```
 

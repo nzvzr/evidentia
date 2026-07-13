@@ -17,7 +17,12 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.eval.dataset import BENCHMARK_VERSION, scenario_count  # noqa: E402
-from app.eval.export import write_audit_csv, write_csv, write_json  # noqa: E402
+from app.eval.export import (  # noqa: E402
+    write_audit_csv,
+    write_csv,
+    write_generation_audit_csv,
+    write_json,
+)
 from app.eval.runner import DEFAULT_MODES, run_benchmark, summarize  # noqa: E402
 
 
@@ -38,6 +43,21 @@ def _print_repairs(results) -> None:
         print("(no invalid evidence codes required repair)")
 
 
+def _print_generation(results) -> None:
+    print("\n--- dropped / transformed generated items ---")
+    any_dropped = False
+    for row in results:
+        for a in row.get("generationAudit", []):
+            any_dropped = True
+            print(
+                f"[{row['requestedMode']:<13}] {row['scenarioId']:<26} {a['itemType']:<8} "
+                f"{a['finalDecision']:<13} score={a['supportScore']:<6} "
+                f"reason={a['rejectionReason']:<28} :: {a['title'][:56]}"
+            )
+    if not any_dropped:
+        print("(no risks or steps were dropped or converted to evidence gaps)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Evidentia LLM benchmark.")
     parser.add_argument("--modes", default=",".join(DEFAULT_MODES),
@@ -45,6 +65,8 @@ def main() -> None:
     parser.add_argument("--out-dir", default="benchmark_results")
     parser.add_argument("--print-repairs", action="store_true",
                         help="print every repaired citation, matched terms, score, and ground-truth match")
+    parser.add_argument("--print-generation", action="store_true",
+                        help="print every dropped or evidence-gap risk/step with its support score and reason")
     args = parser.parse_args()
 
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
@@ -59,27 +81,32 @@ def main() -> None:
     write_json(f"{stem}.json", results, summary)
     write_csv(f"{stem}.csv", results)
     write_audit_csv(f"{stem}.audit.csv", results)
+    write_generation_audit_csv(f"{stem}.gen-audit.csv", results)
 
     if args.print_repairs:
         _print_repairs(results)
+    if args.print_generation:
+        _print_generation(results)
 
-    print(f"\nWrote {stem}.json, {stem}.csv and {stem}.audit.csv\n")
+    print(f"\nWrote {stem}.json, {stem}.csv, {stem}.audit.csv and {stem}.gen-audit.csv\n")
     header = (
-        f"{'mode':<12}{'overall':>8}{'narr':>7}{'ungrB':>6}{'ungrA':>6}"
-        f"{'repl':>5}{'insuf':>6}{'avgRlv':>7}{'exp%':>6}{'calls':>6}{'cost$':>9}"
+        f"{'mode':<12}{'overall':>8}{'narr':>7}{'genR':>6}{'keptR':>6}{'dropR':>6}"
+        f"{'insufF':>7}{'srcMis':>7}{'esup':>6}{'recall':>7}{'cost$':>9}"
     )
     print(header)
     print("-" * len(header))
     for mode, s in summary.items():
+        recall = s["avgExpectedRiskRecall"]
+        recall_s = "-" if recall is None else f"{recall}"
         print(
             f"{mode:<12}{s['avgOverallQualityScore']:>8}{s['avgNarrativeUtilityScore']:>7}"
-            f"{s['ungroundedBeforeRepair']:>6}{s['ungroundedAfterRepair']:>6}"
-            f"{s['repairReplaced']:>5}{s['repairInsufficient']:>6}"
-            f"{s['averageRepairRelevanceScore']:>7}{s['expectedEvidenceMatchRate']:>6}"
-            f"{s['totalLlmCalls']:>6}{s['totalEstimatedCostUsd']:>9}"
+            f"{s['risksGeneratedBeforeFiltering']:>6}{s['groundedRisksKept']:>6}{s['unsupportedRisksDropped']:>6}"
+            f"{s['insufficientEvidenceItemsFinal']:>7}{s['sourceDocumentMismatchCount']:>7}"
+            f"{s['avgEvidenceSupportScore']:>6}{recall_s:>7}{s['totalEstimatedCostUsd']:>9}"
         )
-    print("\nungrB/ungrA = ungrounded evidence before/after repair · repl/insuf = repaired/insufficient · "
-          "avgRlv = avg repair relevance · exp% = expected-evidence match rate")
+    print("\ngenR/keptR/dropR = risks generated/grounded-kept/unsupported-dropped · "
+          "insufF = final insufficient-evidence items · srcMis = source-doc mismatches · "
+          "esup = avg evidence-support score · recall = expected-risk recall")
 
 
 if __name__ == "__main__":

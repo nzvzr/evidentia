@@ -66,6 +66,31 @@ Rationale: a valid citation ID must actually support its item; no LLM/embeddings
 yet. Known residual: scorer is lexical, so rare cross-topic matches remain (audit
 surfaces them); consider category/persona affinity or embeddings next.
 
+### 2026-07-13 · Source-constrained (evidence-first) risk & workflow generation
+Fixed the upstream cause of the 29 `N/A` markers. Previously `risk_analyzer` chose
+generic risks from a static pool and attached evidence afterward, so most risks
+had no supporting *selected* document and were later marked insufficient by repair.
+Now generation is evidence-first: a new deterministic **evidence-support scorer**
+(`tools/evidence_support.py`, separate from repair) scores a candidate section by
+selected-document ownership, risk/workflow-specific vocabulary, exact domain
+phrases, document-category affinity, persona relevance, market relevance, and
+negation/contradiction markers. A risk is emitted grounded only when a section it
+*owns* clears `EVIDENTIA_MIN_EVIDENCE_SUPPORT` (≥2 signals or a domain phrase);
+unsupported risks are dropped, never filler-filled to a count. One explicit
+evidence-gap risk (`N/A`) is emitted only when the missing documentation is itself
+operationally relevant to the persona. `workflow_builder` applies the same
+principle (preferred/topical section, else evidence-gap step). Both agents now
+return `(items, gen_info)` carrying internal provenance (`sourceDocumentId`,
+`sourceCitationId`, `matchedSignals`, `generationReason`) and a drop/transform
+audit — provenance stays in telemetry and never enters the public report schema.
+`metrics.validate_schema` was relaxed (risks ≤6, workflow 1–6) so honest low
+counts pass; this is backward compatible with existing 3–5 / 4–6 reports. Result
+(gpt-4o-mini, v1): repair now sees **0 invalid codes** (was 31); 80 risks proposed
+→ 44 grounded, 36 dropped at source; expected-risk recall 0.833; grounding 93.9,
+overall deterministic 93.8 / summary 95.0. Rationale: a grounded risk must be
+derived from evidence the report actually cites, not patched after the fact; kept
+fully deterministic (no LLM/embeddings). Residual: matching is still lexical.
+
 ### 2026-07 · AI memory/handoff docs
 Added `AGENTS.md`, `.cursor/rules/evidentia-context.mdc`, and `docs/ai/*` so future
 conversations can continue without chat history. Docs are the handoff source of

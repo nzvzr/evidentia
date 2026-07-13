@@ -30,6 +30,11 @@ CSV_COLUMNS = [
     "repairReplaced", "repairInsufficient", "validReplacementRate",
     "expectedEvidenceMatchRate", "insufficientEvidenceRate", "lowConfidenceRepairRate",
     "averageRepairRelevanceScore",
+    # source-constrained generation
+    "risksGeneratedBeforeFiltering", "groundedRisksKept", "unsupportedRisksDropped",
+    "workflowsGeneratedBeforeFiltering", "groundedWorkflowStepsKept", "unsupportedWorkflowStepsDropped",
+    "insufficientEvidenceItemsFinal", "sourceDocumentMismatchCount",
+    "evidenceSupportScoreAvg", "evidenceSupportScoreMin", "expectedRiskRecall",
     # change telemetry
     "reportChanged", "summaryChanged", "personaBriefChanged", "suggestedActionsAccepted", "llmFallback",
     "llmCalls", "contextChars", "inputTokens", "outputTokens", "estimatedCostUsd", "latencyMs",
@@ -101,3 +106,28 @@ def to_audit_csv(results: List[Dict[str, Any]]) -> str:
 def write_audit_csv(path: str, results: List[Dict[str, Any]]) -> None:
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(to_audit_csv(results))
+
+
+GEN_AUDIT_COLUMNS = [
+    "scenarioId", "requestedMode", "itemType", "title", "proposedRiskOrStep",
+    "proposedSourceDocumentId", "proposedCitationId", "supportScore",
+    "rejectionReason", "finalDecision",
+]
+
+
+def to_generation_audit_csv(results: List[Dict[str, Any]]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=GEN_AUDIT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for row in results:
+        for a in row.get("generationAudit", []):
+            record = {k: a.get(k, "") for k in GEN_AUDIT_COLUMNS}
+            record["scenarioId"] = row.get("scenarioId", "")
+            record["requestedMode"] = row.get("requestedMode", "")
+            writer.writerow(record)
+    return buf.getvalue()
+
+
+def write_generation_audit_csv(path: str, results: List[Dict[str, Any]]) -> None:
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(to_generation_audit_csv(results))

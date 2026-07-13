@@ -21,7 +21,7 @@ from app.core.config import get_settings
 from app.services.llm import LLMCallResult, generate_structured_object
 from app.tools.document_search import rank_sections_for_persona, summarize_sections
 from app.tools.evidence_pack import build_evidence_pack, pack_to_text
-from app.tools.citation_tools import repair_grounding
+from app.tools.citation_tools import INSUFFICIENT_EVIDENCE, repair_grounding
 from app.tools.risk_tools import detect_contradictions
 from app.tools.text_quality import is_precise_text
 
@@ -365,8 +365,10 @@ def run_pipeline_ex(
 
     # --- deterministic baseline (always) ---
     persona_brief = persona_mapper(market, persona, custom_persona, sections)
-    workflow_steps = workflow_builder(persona_key, market, sections)
-    risks = risk_analyzer(persona_key, market, sections)
+    workflow_steps, wf_gen = workflow_builder(persona_key, market, sections)
+    risks, risk_gen = risk_analyzer(
+        persona_key, market, sections, min_support=settings.evidentia_min_evidence_support
+    )
     citations = citation_binder(sections, workflow_steps, risks)
     base_metrics = metrics_agent(
         documents, sections, citations, risks, workflow_steps, market, persona_key, persona_brief["title"]
@@ -501,13 +503,29 @@ def run_pipeline_ex(
     if cache_enabled:
         _CACHE[cache_key] = copy.deepcopy(report)
 
+    final_codes = [w["evidenceCode"] for w in report["workflowSteps"]] + [r["evidenceCode"] for r in report["risks"]]
+    support_scores = list(risk_gen["supportScores"])
+    generation_info = {
+        "risksGeneratedBeforeFiltering": risk_gen["generatedBeforeFiltering"],
+        "groundedRisksKept": risk_gen["groundedKept"],
+        "unsupportedRisksDropped": risk_gen["unsupportedDropped"],
+        "workflowsGeneratedBeforeFiltering": wf_gen["generatedBeforeFiltering"],
+        "groundedWorkflowStepsKept": wf_gen["groundedKept"],
+        "unsupportedWorkflowStepsDropped": wf_gen["unsupportedDropped"],
+        "insufficientEvidenceItemsFinal": sum(1 for c in final_codes if c == INSUFFICIENT_EVIDENCE),
+        "sourceDocumentMismatchCount": risk_gen["sourceDocumentMismatch"] + wf_gen["sourceDocumentMismatch"],
+        "evidenceSupportScoreAvg": round(sum(support_scores) / len(support_scores), 3) if support_scores else 0.0,
+        "evidenceSupportScoreMin": round(min(support_scores), 3) if support_scores else 0.0,
+        "generationAudit": risk_gen["audit"] + wf_gen["audit"],
+    }
+
     telemetry = _telemetry(
         configured, resolved, report["generationMode"], settings, model,
         llm_calls, context_chars, input_tokens, output_tokens, cache_status, started,
         contradictions, base_metrics["confidence"],
         summary_changed=summary_changed, persona_changed=persona_changed,
         actions_accepted=actions_accepted, llm_fallback=llm_fallback,
-        gate=gate_info, repair=repair_info,
+        gate=gate_info, repair=repair_info, generation=generation_info,
     )
     return report, telemetry
 
@@ -519,12 +537,14 @@ def _telemetry(
     summary_changed: bool = False, persona_changed: bool = False,
     actions_accepted: int = 0, llm_fallback: bool = False,
     gate: Optional[Dict[str, Any]] = None, repair: Optional[Dict[str, int]] = None,
+    generation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     import time
 
     used_llm = resolved in ("summary", "full")
     gate = gate or {}
     repair = repair or {}
+    generation = generation or {}
     return {
         "intensityConfigured": configured,
         "intensityResolved": resolved,
@@ -560,4 +580,16 @@ def _telemetry(
         "ungroundedAfterRepair": repair.get("after", 0),
         "evidenceRepairs": repair.get("repairs", 0),
         "repairAudit": repair.get("audit", []),
+        # source-constrained generation
+        "risksGeneratedBeforeFiltering": generation.get("risksGeneratedBeforeFiltering", 0),
+        "groundedRisksKept": generation.get("groundedRisksKept", 0),
+        "unsupportedRisksDropped": generation.get("unsupportedRisksDropped", 0),
+        "workflowsGeneratedBeforeFiltering": generation.get("workflowsGeneratedBeforeFiltering", 0),
+        "groundedWorkflowStepsKept": generation.get("groundedWorkflowStepsKept", 0),
+        "unsupportedWorkflowStepsDropped": generation.get("unsupportedWorkflowStepsDropped", 0),
+        "insufficientEvidenceItemsFinal": generation.get("insufficientEvidenceItemsFinal", 0),
+        "sourceDocumentMismatchCount": generation.get("sourceDocumentMismatchCount", 0),
+        "evidenceSupportScoreAvg": generation.get("evidenceSupportScoreAvg", 0.0),
+        "evidenceSupportScoreMin": generation.get("evidenceSupportScoreMin", 0.0),
+        "generationAudit": generation.get("generationAudit", []),
     }

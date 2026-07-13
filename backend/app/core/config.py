@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # minimum relevance score for the deterministic grounding-repair scorer to
     # accept a replacement citation; below this an item is marked insufficient.
     evidentia_repair_min_relevance: float = 2.0
+    # minimum evidence-support strength (signal terms + 2×phrases) for a risk or
+    # workflow step to be emitted as grounded from a source section.
+    evidentia_min_evidence_support: int = 2
 
     # --- persistence ---
     database_url: str = ""

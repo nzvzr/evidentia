@@ -187,6 +187,24 @@ response fell back entirely).
 
 ### Calibration safeguards
 
+- **Source-constrained (evidence-first) generation** runs upstream of repair.
+  `risk_analyzer` and `workflow_builder` derive each risk/step from a *selected*
+  source section rather than picking a generic item and citing it afterward. A
+  deterministic **evidence-support scorer** (`tools/evidence_support.py`, separate
+  from repair) scores a candidate section by selected-document ownership,
+  risk/workflow vocabulary, exact domain phrases, category affinity, persona and
+  market relevance, and negation/contradiction markers. A risk is grounded only
+  when a section it *owns* clears `EVIDENTIA_MIN_EVIDENCE_SUPPORT` (default 2 — i.e.
+  ≥2 signal terms or a domain phrase); unsupported risks are dropped (never
+  filler-filled), and one explicit evidence-gap risk is emitted only when the
+  missing documentation is itself operationally relevant. Internal provenance
+  (`sourceDocumentId`, `sourceCitationId`, `matchedSignals`, `generationReason`)
+  is exported in telemetry/`*.gen-audit.csv` only — never in the public report.
+  The benchmark reports `risksGeneratedBeforeFiltering`, `groundedRisksKept`,
+  `unsupportedRisksDropped`, workflow equivalents, `insufficientEvidenceItemsFinal`,
+  `sourceDocumentMismatchCount`, `evidenceSupportScore` avg/min, and
+  `expectedRiskRecall`. Use `python scripts/run_benchmark.py --print-generation`
+  to inspect every dropped/transformed item.
 - **Deterministic grounding repair** runs before report assembly (both deterministic
   and LLM paths): every workflow/risk `evidenceCode` is validated against the
   citation IDs of the selected documents; invalid codes are replaced using an

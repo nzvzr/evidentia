@@ -75,6 +75,14 @@ def run_benchmark(
             low_conf = sum(1 for a in replaced if a["relevanceScore"] < LOW_CONFIDENCE_RELEVANCE)
             relevance_sum = sum(a["relevanceScore"] for a in replaced)
 
+            # --- expected-risk recall (grounded risk evidence vs ground truth) ---
+            report_risk_codes = {r["evidenceCode"] for r in report["risks"]}
+            expected_evidence = set(expected.get("evidenceCodes", []))
+            expected_recall = (
+                round(len(expected_evidence & report_risk_codes) / len(expected_evidence), 3)
+                if expected_evidence else None
+            )
+
             results.append(
                 {
                     "benchmarkVersion": BENCHMARK_VERSION,
@@ -129,6 +137,19 @@ def run_benchmark(
                     "insufficientEvidenceRate": round(len(insufficient) / len(audit), 3) if audit else 0.0,
                     "lowConfidenceRepairRate": round(low_conf / len(replaced), 3) if replaced else 0.0,
                     "averageRepairRelevanceScore": round(relevance_sum / len(replaced), 3) if replaced else 0.0,
+                    # source-constrained generation
+                    "risksGeneratedBeforeFiltering": tel["risksGeneratedBeforeFiltering"],
+                    "groundedRisksKept": tel["groundedRisksKept"],
+                    "unsupportedRisksDropped": tel["unsupportedRisksDropped"],
+                    "workflowsGeneratedBeforeFiltering": tel["workflowsGeneratedBeforeFiltering"],
+                    "groundedWorkflowStepsKept": tel["groundedWorkflowStepsKept"],
+                    "unsupportedWorkflowStepsDropped": tel["unsupportedWorkflowStepsDropped"],
+                    "insufficientEvidenceItemsFinal": tel["insufficientEvidenceItemsFinal"],
+                    "sourceDocumentMismatchCount": tel["sourceDocumentMismatchCount"],
+                    "evidenceSupportScoreAvg": tel["evidenceSupportScoreAvg"],
+                    "evidenceSupportScoreMin": tel["evidenceSupportScoreMin"],
+                    "generationAudit": tel["generationAudit"],
+                    "expectedRiskRecall": expected_recall,
                     # deltas vs deterministic baseline
                     "overallDeltaVsDeterministic": round(quality["overallQualityScore"] - base_overall, 1),
                     "narrativeDeltaVsDeterministic": round(quality["narrativeUtilityScore"] - base_narrative, 1),
@@ -187,6 +208,24 @@ def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "insufficientEvidenceRate": round(_insuff(rows) / (_repl(rows) + _insuff(rows)), 3) if (_repl(rows) + _insuff(rows)) else 0.0,
             "lowConfidenceRepairRate": round(sum(x["repairLowConfidence"] for x in rows) / _repl(rows), 3) if _repl(rows) else 0.0,
             "averageRepairRelevanceScore": round(sum(x["repairRelevanceSum"] for x in rows) / _repl(rows), 3) if _repl(rows) else 0.0,
+            # source-constrained generation (pooled)
+            "risksGeneratedBeforeFiltering": sum(x["risksGeneratedBeforeFiltering"] for x in rows),
+            "groundedRisksKept": sum(x["groundedRisksKept"] for x in rows),
+            "unsupportedRisksDropped": sum(x["unsupportedRisksDropped"] for x in rows),
+            "workflowsGeneratedBeforeFiltering": sum(x["workflowsGeneratedBeforeFiltering"] for x in rows),
+            "groundedWorkflowStepsKept": sum(x["groundedWorkflowStepsKept"] for x in rows),
+            "unsupportedWorkflowStepsDropped": sum(x["unsupportedWorkflowStepsDropped"] for x in rows),
+            "insufficientEvidenceItemsFinal": sum(x["insufficientEvidenceItemsFinal"] for x in rows),
+            "sourceDocumentMismatchCount": sum(x["sourceDocumentMismatchCount"] for x in rows),
+            "avgEvidenceSupportScore": round(
+                mean([x["evidenceSupportScoreAvg"] for x in rows if x["evidenceSupportScoreAvg"] > 0]), 3
+            ) if any(x["evidenceSupportScoreAvg"] > 0 for x in rows) else 0.0,
+            "minEvidenceSupportScore": round(
+                min([x["evidenceSupportScoreMin"] for x in rows if x["groundedRisksKept"] > 0]), 3
+            ) if any(x["groundedRisksKept"] > 0 for x in rows) else 0.0,
+            "avgExpectedRiskRecall": round(
+                mean([x["expectedRiskRecall"] for x in rows if x["expectedRiskRecall"] is not None]), 3
+            ) if any(x["expectedRiskRecall"] is not None for x in rows) else None,
             "avgLatencyMs": round(mean(x["latencyMs"] for x in rows), 1),
             "totalLlmCalls": sum(x["llmCalls"] for x in rows),
             "totalTokens": sum(x["inputTokens"] + x["outputTokens"] for x in rows),

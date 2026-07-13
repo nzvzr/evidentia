@@ -48,43 +48,64 @@ Currently benchmarked model: **gpt-4o-mini**. Keys live only in `backend/.env`
   `N/A` (insufficient evidence) — never the least-bad citation. Every repair emits
   an audit record (matched terms/phrases, relevance score, top-3 candidates); audit
   is exported in benchmark JSON/CSV but never in the public report.
+- **Source-constrained (evidence-first) generation** (`agents/risk_analyzer.py`,
+  `agents/workflow_builder.py`, `tools/evidence_support.py`): risks and workflow
+  steps are derived from a *selected* source section instead of being chosen
+  generically and cited afterward. A deterministic **evidence-support scorer**
+  (separate from repair) scores a candidate section by selected-document
+  ownership, risk/workflow-specific vocabulary, exact domain phrases, document
+  category affinity, persona relevance, market relevance, and negation/
+  contradiction markers. A risk is emitted grounded only when a section it *owns*
+  clears the configurable signal strength (`EVIDENTIA_MIN_EVIDENCE_SUPPORT`, ≥2
+  signals or a domain phrase). Unsupported risks are **dropped, not filler-filled**;
+  when too few grounded risks remain and the missing documentation is itself
+  operationally relevant, one explicit evidence-gap risk (`N/A`) is emitted.
+  Internal provenance (`sourceDocumentId`, `sourceCitationId`, `matchedSignals`,
+  `generationReason`) is kept in telemetry only — never in the public report.
 - Versioned benchmark dataset (`BENCHMARK_VERSION = v1`, 22 scenarios) with
-  ground-truth expectations; exports JSON + CSV.
+  ground-truth expectations; exports JSON + CSV + repair audit CSV + generation
+  audit CSV (dropped/transformed items).
 
-## Last key-enabled benchmark (gpt-4o-mini, v1)
+## Latest key-enabled benchmark (gpt-4o-mini, v1, 2026-07-13)
 
-| mode | overall | grounding | narrative |
-|------|---------|-----------|-----------|
-| deterministic | 93.9 | 93.9 | 93.9 |
-| summary | 95.5 | 93.9 | 97.1 |
+Source-constrained generation now runs upstream of repair.
 
-Narrative regressions 2 → 0 after gate; field acceptance 25.8%; ungrounded 31 → 0;
-22 LLM calls, $0.008164. (Requires `OPENAI_API_KEY`; not present in fresh VMs.)
+| mode | overall | grounding | narrative | citation acc | schema valid |
+|------|---------|-----------|-----------|--------------|--------------|
+| deterministic | 93.8 | 93.9 | 93.8 | 1.0 | 1.0 |
+| summary | 95.0 | 93.9 | 96.1 | 1.0 | 1.0 |
 
-## Latest deterministic verification (2026-07-13, keyless)
+Generation (identical across modes — generation is deterministic; summary only
+polishes narrative): 80 risks proposed → **44 grounded / 36 unsupported dropped**;
+27 final insufficient-evidence items (deliberate evidence-gap risks + unsupported
+workflow steps); avg evidence-support 11.57, min 9.0; **expected-risk recall
+0.833**; 0 hallucination warnings; summary cost $0.0076.
 
-Repair scorer hardened (IDF + phrases + threshold). Deterministic benchmark (22
-scenarios; summary/full degrade to deterministic without a key):
+## Upstream fix impact (insufficient-evidence before vs after)
 
-- overall **94.2**, narrative **94.6**, schema-valid rate **1.0**.
-- Grounding repair: **31 ungrounded → 0**; **2 replaced** (avg relevance 8.615,
-  `validReplacementRate` 1.0), **29 marked insufficient** (`insufficientEvidenceRate`
-  0.935); `lowConfidenceRepairRate` 0.0; `expectedEvidenceMatchRate` 0.0.
-- The stricter scorer now honestly marks unsupported risks `N/A` instead of
-  force-mapping them (the old scorer replaced all 31 with least-bad matches).
+- **Before (repair-only):** 31 invalid evidence codes reached repair; 2 replaced,
+  **29 marked `N/A`** — i.e. unsupported risks were generated then patched.
+- **After (evidence-first):** repair has nothing to fix —
+  `ungroundedBeforeRepair = 0`, `repairReplaced = 0`, `repairInsufficient = 0`.
+  36 unsupported risk proposals are dropped at the source
+  (`sourceDocumentMismatchCount` drives most), and remaining `N/A` items are
+  intentional evidence-gap markers, not repaired guesses.
 
 ## Tests
 
-- **44 passing** backend unit tests: `python -m pytest -q` (from `backend/` with
+- **53 passing** backend unit tests: `python -m pytest -q` (from `backend/` with
   the venv active). Cover the mode router, quality/grounding scoring, narrative
-  scoring, the narrative gate, and the grounding-repair relevance scorer.
+  scoring, the narrative gate, the grounding-repair relevance scorer, and the new
+  evidence-first generation / evidence-support scorer (`test_evidence_grounding.py`).
 
 ## Open concerns
 
-- **Repaired-citation relevance is lexical, not semantic.** The IDF + phrase scorer
-  is much stricter (only 2 of 31 replaced), but a residual cross-topic match is
-  still possible when two meaningful terms coincide (e.g. a rollback/migration risk
-  matched a pricing "Plan Tiers" section via `deployment`, `plan`). The audit trail
-  surfaces these. Next step: category/persona-aware affinity or embeddings (no LLM
-  call). Also consider tightening `risk_analyzer` so it doesn't select risks whose
-  source document isn't in the selected corpus (drives most `insufficient` markers).
+- **Evidence matching is lexical, not semantic** (both the support scorer and the
+  repair scorer). Deterministic by design for now; next step is category/persona
+  affinity refinement or embeddings (still no LLM call). The generation audit CSV
+  surfaces every dropped/transformed item for inspection.
+- **Expected-risk recall is 0.833, not 1.0**, because grounding now binds a risk to
+  the *highest-signal* section in its source document, which can differ from the
+  ground-truth section id (e.g. `INC-9.1` vs expected `INC-2.1`) — the risk is
+  still correctly grounded to the right document. Ground-truth section ids could be
+  broadened to a prefix match if exact recall is desired.
