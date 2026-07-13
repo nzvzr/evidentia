@@ -1,0 +1,35 @@
+---
+description: Evidentia project context, memory, and handoff protocol for all agents.
+globs:
+alwaysApply: true
+---
+
+# Evidentia context & handoff protocol
+
+Evidentia is a persona-aware documentation agent: a Next.js frontend + a Python
+FastAPI multi-agent backend that turns enterprise docs into cited, role-specific
+playbooks. The pipeline is **deterministic-first**; LLM usage is optional and
+only refines the deterministic baseline.
+
+## Always, before substantial work
+
+1. Read `docs/ai/PROJECT_STATE.md` (current status, LLM modes, latest benchmark, tests).
+2. Read `docs/ai/SESSION_HANDOFF.md` (most recent changes, open concerns, next steps).
+
+Consult `docs/ai/ARCHITECTURE.md` for the stable design and
+`docs/ai/DECISIONS.md` for rationale. Root `AGENTS.md` has commands and guardrails.
+
+## Always, after meaningful implementation
+
+Update the documentation so the next agent can continue:
+- `docs/ai/PROJECT_STATE.md` — refresh the snapshot; keep it concise.
+- `docs/ai/SESSION_HANDOFF.md` — rewrite for the new state; keep it under 100 lines.
+- `docs/ai/DECISIONS.md` — append a new dated entry (append-only; do not edit past ones).
+- `docs/ai/ARCHITECTURE.md` — only if the stable design changed.
+
+## Non-negotiables
+
+- Never commit secrets. `backend/.env` is local + git-ignored; keys live only there.
+- Do not break the public `EvidentiaReport` schema (additive optional fields only).
+- Preserve the deterministic fallback (works with no LLM key and no backend).
+- Run backend `python -m pytest -q` and frontend `npm run build` before finishing.
