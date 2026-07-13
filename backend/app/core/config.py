@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # minimum evidence-support strength (signal terms + 2×phrases) for a risk or
     # workflow step to be emitted as grounded from a source section.
     evidentia_min_evidence_support: int = 2
+    # minimum predicted incremental overall-quality gain (points) for the auto
+    # router to select full mode over summary. Calibrated high on the v1 benchmark
+    # because full is on average worse than summary; see docs/ai/DECISIONS.md.
+    evidentia_router_full_gain_threshold: float = 0.2
 
     # --- persistence ---
     database_url: str = ""

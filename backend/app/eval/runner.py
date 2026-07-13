@@ -189,6 +189,16 @@ def _run_once(
                     "rejectedWorkflowStepCount": tel["rejectedWorkflowStepCount"],
                     "structuralRejectionReasons": tel["structuralRejectionReasons"],
                     "fullModeAnalyticalFallback": tel["fullModeAnalyticalFallback"],
+                    # deterministic pre-LLM analytical scores + routing telemetry
+                    "documentComplexity": len(docs),
+                    "personaComplexity": 1 if (custom or "").strip() else 0,
+                    "deterministicStructuralScoreBaseline": tel["deterministicStructuralScoreBaseline"],
+                    "deterministicNarrativeScoreBaseline": tel["deterministicNarrativeScoreBaseline"],
+                    "routingReason": tel["routingReason"],
+                    "routingConfidence": tel["routingConfidence"],
+                    "predictedIncrementalGain": tel["predictedIncrementalGain"],
+                    "selectedMode": tel["selectedMode"],
+                    "alternativeMode": tel["alternativeMode"],
                     # deltas vs deterministic baseline
                     "overallDeltaVsDeterministic": round(quality["overallQualityScore"] - base_overall, 1),
                     "narrativeDeltaVsDeterministic": round(quality["narrativeUtilityScore"] - base_narrative, 1),

@@ -43,6 +43,11 @@ CSV_COLUMNS = [
     "structuralGateDecision", "acceptedStructuralComponentCount", "rejectedStructuralComponentCount",
     "acceptedRiskCount", "rejectedRiskCount", "acceptedWorkflowStepCount",
     "rejectedWorkflowStepCount", "fullModeAnalyticalFallback",
+    # deterministic pre-LLM scores + auto-routing
+    "documentComplexity", "personaComplexity",
+    "deterministicStructuralScoreBaseline", "deterministicNarrativeScoreBaseline",
+    "routingReason", "routingConfidence", "predictedIncrementalGain",
+    "selectedMode", "alternativeMode",
     # change telemetry
     "reportChanged", "summaryChanged", "personaBriefChanged", "suggestedActionsAccepted", "llmFallback",
     "llmCalls", "contextChars", "inputTokens", "outputTokens", "estimatedCostUsd", "latencyMs",

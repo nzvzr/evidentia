@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import get_settings
+from app.eval.metrics import narrative_score
 from app.services.llm import LLMCallResult, generate_structured_object
 from app.tools.document_search import rank_sections_for_persona, summarize_sections
 from app.tools.evidence_pack import build_evidence_pack, pack_to_text
@@ -26,7 +27,12 @@ from app.tools.risk_tools import detect_contradictions
 from app.tools.text_quality import is_precise_text
 
 from .citation_binder import citation_binder
-from .mode_router import RoutingSignals, route_intensity
+from .mode_router import RoutingSignals, default_routing_decision, route_intensity
+from .structural_gate import (
+    persona_structural_score,
+    risk_structural_score,
+    workflow_structural_score,
+)
 from .narrative_gate import gate_fields
 from .structural_gate import default_structural_telemetry, reconcile_and_gate
 from .document_reader import document_reader
@@ -377,19 +383,41 @@ def run_pipeline_ex(
     contradictions = detect_contradictions(sections, market)
     available_ids = {s["citationId"] for s in sections}
 
+    # --- deterministic pre-LLM analytical scores (used for routing telemetry) ---
+    det_struct_score, det_narr_score = _deterministic_scores(
+        report_id, market, persona, custom_persona, persona_key, persona_brief,
+        documents, sections, workflow_steps, risks, citations, base_metrics,
+        available_ids, contradictions, generated_at,
+    )
+    insufficient_final_baseline = sum(
+        1 for c in ([w["evidenceCode"] for w in workflow_steps] + [r["evidenceCode"] for r in risks])
+        if c == INSUFFICIENT_EVIDENCE
+    )
+    support_scores_baseline = list(risk_gen["supportScores"])
+    routing_signals = RoutingSignals(
+        deterministic_structural_score=det_struct_score,
+        deterministic_narrative_score=det_narr_score,
+        document_complexity=len(documents),
+        contradictions=contradictions,
+        persona_complexity=1 if persona_brief.get("isCustom") else 0,
+        deterministic_confidence=int(base_metrics["confidence"]),
+        citation_coverage=float(base_metrics["citationCoverage"]),
+        grounded_risks_kept=risk_gen["groundedKept"],
+        grounded_workflow_steps_kept=wf_gen["groundedKept"],
+        unsupported_risks_dropped=risk_gen["unsupportedDropped"],
+        insufficient_evidence_items=insufficient_final_baseline,
+        source_document_mismatch=risk_gen["sourceDocumentMismatch"] + wf_gen["sourceDocumentMismatch"],
+        evidence_support_score_avg=round(sum(support_scores_baseline) / len(support_scores_baseline), 3) if support_scores_baseline else 0.0,
+        evidence_support_score_min=round(min(support_scores_baseline), 3) if support_scores_baseline else 0.0,
+    )
+
     # --- resolve intensity (auto routing) ---
     if configured == "auto":
-        resolved = route_intensity(
-            RoutingSignals(
-                document_complexity=len(documents),
-                contradictions=contradictions,
-                citation_coverage=float(base_metrics["citationCoverage"]),
-                persona_complexity=1 if persona_brief.get("isCustom") else 0,
-                deterministic_confidence=int(base_metrics["confidence"]),
-            )
-        )
+        routing = route_intensity(routing_signals, settings.evidentia_router_full_gain_threshold)
+        resolved = routing.mode
     else:
         resolved = configured if configured in ("off", "summary", "full") else "off"
+        routing = default_routing_decision(resolved, configured)
 
     # Without a configured/available LLM, any llm mode degrades to deterministic.
     if resolved in ("summary", "full") and not settings.is_llm_enabled():
@@ -403,6 +431,7 @@ def run_pipeline_ex(
         telemetry = _telemetry(
             configured, resolved, cached["generationMode"], settings, model, 0, 0, 0, 0,
             "hit", started, contradictions, base_metrics["confidence"],
+            routing=routing, det_structural=det_struct_score, det_narrative=det_narr_score,
         )
         logger.info(
             "[Evidentia LLM] intensity=%s->%s calls=0 model=%s mode=%s (cache hit)",
@@ -562,9 +591,35 @@ def run_pipeline_ex(
         summary_changed=summary_changed, persona_changed=persona_changed,
         actions_accepted=actions_accepted, llm_fallback=llm_fallback,
         gate=gate_info, repair=repair_info, generation=generation_info,
-        structural=structural_info,
+        structural=structural_info, routing=routing,
+        det_structural=det_struct_score, det_narrative=det_narr_score,
     )
     return report, telemetry
+
+
+def _deterministic_scores(
+    report_id, market, persona, custom_persona, persona_key, persona_brief,
+    documents, sections, workflow_steps, risks, citations, base_metrics,
+    available_ids, contradictions, generated_at,
+) -> tuple[float, float]:
+    """Structural + narrative scores of the deterministic baseline (pre-LLM)."""
+    from statistics import mean
+
+    pb_s, _ = persona_structural_score(persona_brief, sections, market, persona_key)
+    wf_s, _ = workflow_structural_score(workflow_steps, sections, persona_key, available_ids, persona_brief)
+    rk_s, _ = risk_structural_score(risks, sections, persona_key, market, available_ids, contradictions)
+    struct = round(mean([pb_s, wf_s, rk_s]), 2)
+
+    agent_steps = build_agent_steps(documents, sections, risks, citations, workflow_steps, persona_brief["title"])
+    det_report = report_composer(
+        report_id=report_id, market=market, persona=persona, custom_persona=custom_persona,
+        persona_key=persona_key, persona_brief=persona_brief, documents=documents, sections=sections,
+        workflow_steps=workflow_steps, risks=risks, citations=citations, metrics=base_metrics,
+        agent_steps=agent_steps, generated_at=generated_at,
+    )
+    det_report["suggestedActions"] = suggested_actions_for(persona_key)
+    narr = narrative_score(det_report, available_ids, custom_persona)
+    return struct, narr
 
 
 def _telemetry(
@@ -575,6 +630,7 @@ def _telemetry(
     actions_accepted: int = 0, llm_fallback: bool = False,
     gate: Optional[Dict[str, Any]] = None, repair: Optional[Dict[str, int]] = None,
     generation: Optional[Dict[str, Any]] = None, structural: Optional[Dict[str, Any]] = None,
+    routing: Optional[Any] = None, det_structural: float = 0.0, det_narrative: float = 0.0,
 ) -> Dict[str, Any]:
     import time
 
@@ -583,6 +639,7 @@ def _telemetry(
     repair = repair or {}
     generation = generation or {}
     structural = structural or default_structural_telemetry()
+    routing_tel = routing.as_telemetry() if routing is not None else default_routing_decision(resolved, configured).as_telemetry()
     return {
         "intensityConfigured": configured,
         "intensityResolved": resolved,
@@ -643,4 +700,15 @@ def _telemetry(
         "rejectedWorkflowStepCount": structural["rejectedWorkflowStepCount"],
         "structuralRejectionReasons": structural["structuralRejectionReasons"],
         "fullModeAnalyticalFallback": structural["fullModeAnalyticalFallback"],
+        # deterministic pre-LLM analytical scores (routing inputs)
+        "deterministicStructuralScoreBaseline": det_structural,
+        "deterministicNarrativeScoreBaseline": det_narrative,
+        # auto-routing decision
+        "routingReason": routing_tel["routingReason"],
+        "routingSignals": routing_tel["routingSignals"],
+        "routingConfidence": routing_tel["routingConfidence"],
+        "predictedIncrementalGain": routing_tel["predictedIncrementalGain"],
+        "selectedMode": routing_tel["selectedMode"],
+        "alternativeMode": routing_tel["alternativeMode"],
+        "fullEligibilityChecks": routing_tel["fullEligibilityChecks"],
     }
