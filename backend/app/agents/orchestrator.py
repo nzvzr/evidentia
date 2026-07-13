@@ -410,6 +410,10 @@ def run_pipeline_ex(
     context_chars = 0
     input_tokens = 0
     output_tokens = 0
+    summary_changed = False
+    persona_changed = False
+    actions_accepted = 0
+    llm_fallback = False
 
     if resolved == "full":
         try:
@@ -445,6 +449,8 @@ def run_pipeline_ex(
 
     # --- narrative polish (summary + full share one final call) ---
     if resolved in ("summary", "full"):
+        base_summary = report["summary"]
+        base_desc = report["personaBrief"]["description"]
         try:
             max_tokens = 500 if resolved == "summary" else settings.evidentia_max_output_tokens
             r_polish, updates = _llm_report_polish(report, sections, max_tokens)
@@ -454,13 +460,17 @@ def run_pipeline_ex(
             output_tokens += r_polish.output_tokens
             if "summary" in updates:
                 report["summary"] = updates["summary"]
+                summary_changed = updates["summary"] != base_summary
             # topFinding is intentionally kept deterministic (clean + executive).
             if "personaBriefDescription" in updates:
                 report["personaBrief"]["description"] = updates["personaBriefDescription"]
+                persona_changed = updates["personaBriefDescription"] != base_desc
             if "suggestedActions" in updates:
                 report["suggestedActions"] = updates["suggestedActions"]
+                actions_accepted = len(updates["suggestedActions"])
+            llm_fallback = not updates
         except Exception:  # noqa: BLE001
-            pass
+            llm_fallback = True
 
     # --- generation metadata ---
     if resolved == "off":
@@ -485,6 +495,8 @@ def run_pipeline_ex(
         configured, resolved, report["generationMode"], settings, model,
         llm_calls, context_chars, input_tokens, output_tokens, cache_status, started,
         contradictions, base_metrics["confidence"],
+        summary_changed=summary_changed, persona_changed=persona_changed,
+        actions_accepted=actions_accepted, llm_fallback=llm_fallback,
     )
     return report, telemetry
 
@@ -493,6 +505,8 @@ def _telemetry(
     configured, resolved, generation_mode, settings, model,
     llm_calls, context_chars, input_tokens, output_tokens, cache_status, started,
     contradictions, deterministic_confidence,
+    summary_changed: bool = False, persona_changed: bool = False,
+    actions_accepted: int = 0, llm_fallback: bool = False,
 ) -> Dict[str, Any]:
     import time
 
@@ -512,4 +526,11 @@ def _telemetry(
         "latencyMs": round((time.perf_counter() - started) * 1000, 2),
         "contradictions": contradictions,
         "deterministicConfidence": deterministic_confidence,
+        "reportChanged": bool(summary_changed or persona_changed or actions_accepted > 0),
+        "acceptedLlmUpdates": {
+            "summaryChanged": summary_changed,
+            "personaBriefChanged": persona_changed,
+            "suggestedActionsAccepted": actions_accepted,
+            "llmFallback": llm_fallback,
+        },
     }

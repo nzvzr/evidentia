@@ -41,14 +41,18 @@ def main() -> None:
     write_csv(f"{stem}.csv", results)
 
     print(f"\nWrote {stem}.json and {stem}.csv\n")
-    header = f"{'mode':<14}{'avgScore':>9}{'schemaOK':>9}{'citAcc':>8}{'halluc':>8}{'calls':>7}{'tokens':>9}{'costUSD':>10}{'latMs':>9}"
+    header = (
+        f"{'mode':<14}{'overall':>8}{'ground':>8}{'narr':>7}{'nΔdet':>7}"
+        f"{'schemaOK':>9}{'halluc':>8}{'changed':>8}{'calls':>7}{'costUSD':>10}"
+    )
     print(header)
     print("-" * len(header))
     for mode, s in summary.items():
         print(
-            f"{mode:<14}{s['avgQualityScore']:>9}{s['schemaValidRate']:>9}"
-            f"{s['avgCitationAccuracy']:>8}{s['avgHallucinationWarnings']:>8}"
-            f"{s['totalLlmCalls']:>7}{s['totalTokens']:>9}{s['totalEstimatedCostUsd']:>10}{s['avgLatencyMs']:>9}"
+            f"{mode:<14}{s['avgOverallQualityScore']:>8}{s['avgGroundingScore']:>8}"
+            f"{s['avgNarrativeUtilityScore']:>7}{s['avgNarrativeDeltaVsDeterministic']:>7}"
+            f"{s['schemaValidRate']:>9}{s['avgHallucinationWarnings']:>8}{s['reportsChanged']:>8}"
+            f"{s['totalLlmCalls']:>7}{s['totalEstimatedCostUsd']:>10}"
         )
 
 

@@ -10,14 +10,19 @@ from typing import Any, Dict, List
 
 from app.eval.dataset import BENCHMARK_VERSION
 
-# Scalar columns for the CSV (list/dict fields are joined or omitted).
+# Scalar columns for the CSV (list/dict fields are omitted).
 CSV_COLUMNS = [
     "benchmarkVersion", "promptVersion", "scenarioId", "category", "requestedMode",
     "intensityConfigured", "intensityResolved", "generationMode", "provider", "model",
-    "cacheStatus", "schemaValid", "citationAccuracy", "citationCoverage", "personaRelevance",
-    "actionSpecificity", "hallucinationWarnings", "qualityScore", "llmCalls", "contextChars",
-    "inputTokens", "outputTokens", "estimatedCostUsd", "latencyMs", "contradictions",
-    "deterministicConfidence",
+    "cacheStatus",
+    "overallQualityScore", "groundingScore", "narrativeUtilityScore",
+    "overallDeltaVsDeterministic", "narrativeDeltaVsDeterministic",
+    "schemaValid", "citationAccuracy", "citationCoverage", "hallucinationWarnings",
+    "factualConsistency", "summaryCompleteness", "concision", "personaMarketRelevance",
+    "actionUsefulness", "actionAlignment",
+    "reportChanged", "summaryChanged", "personaBriefChanged", "suggestedActionsAccepted", "llmFallback",
+    "llmCalls", "contextChars", "inputTokens", "outputTokens", "estimatedCostUsd", "latencyMs",
+    "contradictions", "deterministicConfidence",
 ]
 
 

@@ -163,10 +163,27 @@ a dataset of representative scenarios (`app/eval/dataset.py`, `BENCHMARK_VERSION
 covering standard personas, custom personas, conflicting documents, insufficient
 evidence, prompt-injection attempts, and high-risk compliance cases.
 
-For every scenario × mode it records schema validity, citation accuracy, citation
-coverage, persona relevance, action specificity, hallucination warnings, latency,
-token usage, estimated cost, provider, model, prompt version, and cache status,
-plus a **weighted quality score (0–100)**.
+Each scenario carries ground-truth expectations (expected evidence codes, action
+concepts, forbidden claims, summary facts). For every scenario × mode it records
+two independent score axes plus their blend, so LLM narrative improvements are
+measured without weakening grounding:
+
+- **groundingScore** — schema validity, citation accuracy, citation coverage, and
+  hallucination/injection warnings (unchanged by summary mode).
+- **narrativeUtilityScore** — the fields summary mode rewrites: summary factual
+  consistency, summary completeness (persona, market, real doc/risk/citation
+  counts, top-risk concept + its evidence code, ≥2 top workflow steps), concision,
+  persona/market relevance (evaluated on the actual summary + persona brief +
+  actions, not the deterministic pre-polish score), action usefulness (operational
+  verb + concrete object + link to a real risk/step/citation), action alignment,
+  and a vague/repetition penalty.
+- **overallQualityScore** — a 50/50 blend, plus **delta vs deterministic** per
+  scenario (overall and narrative).
+
+It also records latency, token usage, estimated cost, provider, model, prompt
+version, cache status, and change telemetry (`reportChanged`, whether the summary
+/ persona brief changed, number of accepted LLM actions, and whether the LLM
+response fell back entirely).
 
 Run it and export JSON + CSV:
 
