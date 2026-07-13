@@ -141,20 +141,34 @@ Each request logs a usage line (no keys), e.g.:
 [Evidentia LLM] intensity=summary->summary calls=1 model=gpt-4o-mini contextChars=4120 mode=llm-summary
 ```
 
-### Auto mode
+### Auto mode (calibrated conservative router)
 
 Set `EVIDENTIA_LLM_INTENSITY=auto` to let the pipeline pick `off`/`summary`/`full`
-per request from deterministic-baseline signals:
+per request from **pre-LLM deterministic signals only** (`app/agents/mode_router.py`):
+deterministic structural & narrative scores, document complexity, contradictions,
+persona complexity, deterministic confidence, citation coverage, grounded risk/step
+counts, dropped risks, insufficient-evidence items, source-document mismatch, and
+evidence-support avg/min.
 
-- **document complexity** (number of selected documents)
-- **contradictions** (documented conflicts/gaps in the corpus)
-- **citation coverage** and **deterministic confidence** (from the baseline metrics)
-- **persona complexity** (custom/free-text roles)
+The router is **calibrated from the benchmark** (see `docs/ai/DECISIONS.md`):
 
-Routing (`app/agents/mode_router.py`): insufficient evidence (≤1 doc) → `summary`;
-contradictions, custom persona, large corpus, or low confidence → `full`; simple,
-well-covered, high-confidence cases → `off`; otherwise `summary`. The existing
-`off`/`summary`/`full` modes are unchanged.
+- **summary** is the default (reliable, cheap narrative polish);
+- **off** only when the deterministic baseline is already strong;
+- **full** only when there is a clear deterministic analytical weakness AND
+  sufficient selected-document evidence AND ≥2 independent opportunity signals AND
+  predicted incremental gain > `EVIDENTIA_ROUTER_FULL_GAIN_THRESHOLD` (default 0.2).
+
+A custom persona, a single contradiction, a large corpus, or a slightly-low
+confidence never force full; ties prefer the cheaper/faster mode. On the current v1
+corpus the oracle gain of routing over always-summary is only +0.12 and full is
+Pareto-dominated, so auto resolves to summary everywhere and full stays a manual
+mode. Every run emits routing telemetry (`routingReason`, `routingSignals`,
+`routingConfidence`, `predictedIncrementalGain`, `selectedMode`, `alternativeMode`,
+`fullEligibilityChecks`). The existing `off`/`summary`/`full` modes are unchanged.
+
+Run `python scripts/calibrate_router.py` to reproduce the oracle analysis, policy
+comparison (always-{deterministic,summary,full}, previous auto, proposed, oracle),
+threshold grid search, and leave-one-category-out validation.
 
 ## LLM evaluation & calibration benchmark
 

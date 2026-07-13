@@ -125,6 +125,41 @@ analytical changes must be provably better and non-regressing before we calibrat
 or enable auto-routing to full; the data shows summary remains the sweet spot.
 Deterministic (no LLM/embeddings) so it is explainable and unit-testable.
 
+### 2026-07-13 · Auto-router calibration — auto defaults to summary, full stays manual
+Before tuning any thresholds, ran an oracle analysis (`scripts/calibrate_router.py`)
+to decide whether auto-routing has enough theoretical value to justify its
+complexity. On the v1 benchmark (gpt-4o-mini, 22 scenarios, deterministic/summary/
+full): the **oracle** (best per-scenario mode, ε=0.2 ties preferring the cheaper
+mode) averages 95.47 overall vs always-summary 95.36 — a **gain of only +0.12**,
+below the 0.2 bar. Full is the best choice in just 2/22 scenarios and is
+**Pareto-dominated** (frontier = {deterministic, summary}) once cost (~4×) and
+latency (~5×) are considered. A threshold grid search (full-gain ∈ {0.0…1.0}) and
+leave-one-category-out validation found **no interpretable policy that beats
+always-summary by ≥0.2 within the hard constraints** (no avg regression vs summary,
+no scenario worse than summary by >0.5, cost ≤125% of summary, latency ≤150% of
+summary). The previous aggressive router (contradiction/custom-persona/large-corpus/
+low-confidence → full) actually scored *below* summary (95.02) at 3.3× cost and
+violated the constraints (routed 18/22 to full).
+
+Decision: rewrote `agents/mode_router.py` as a conservative, interpretable,
+deterministic router driven by **pre-LLM deterministic signals only** (deterministic
+structural + narrative scores, doc complexity, contradictions, persona complexity,
+confidence, citation coverage, grounded risk/step counts, dropped risks,
+insufficient-evidence items, source mismatch, evidence-support avg/min). Summary is
+the default; `off` only when the baseline is already strong; **full requires the
+conjunction of a clear deterministic analytical weakness AND sufficient
+selected-document evidence AND ≥2 independent opportunity signals AND predicted
+incremental gain > `EVIDENTIA_ROUTER_FULL_GAIN_THRESHOLD`**. A custom persona alone,
+a single contradiction, a high document count, or a slightly-low confidence never
+force full; ties prefer the cheaper/faster mode. On the current corpus this
+conjunction never fires, so **auto resolves to summary everywhere**; full is retained
+as an explicit manual mode. Routing telemetry (`routingReason`, `routingSignals`,
+`routingConfidence`, `predictedIncrementalGain`, `selectedMode`, `alternativeMode`,
+`fullEligibilityChecks`) is emitted for every run. Rationale: benchmark evidence does
+not justify automatic full routing today; the mechanism is unit-tested and will
+select full if a future corpus/model makes it genuinely and cheaply better. Public
+report schema unchanged.
+
 ### 2026-07 · AI memory/handoff docs
 Added `AGENTS.md`, `.cursor/rules/evidentia-context.mdc`, and `docs/ai/*` so future
 conversations can continue without chat history. Docs are the handoff source of

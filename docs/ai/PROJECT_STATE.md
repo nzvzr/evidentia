@@ -23,8 +23,14 @@ Deterministic-first pipeline; optional LLM refinement layered on top.
 - `off` — deterministic only, 0 LLM calls (`generationMode: deterministic`).
 - `summary` — deterministic + 1 LLM call to polish narrative (`llm-summary`). Default.
 - `full` — deterministic + ≤3 LLM calls (`llm-assisted`).
-- `auto` — router picks off/summary/full from document complexity, contradictions,
-  citation coverage, persona complexity, deterministic confidence.
+- `auto` — **calibrated conservative router** (`agents/mode_router.py`). Routes from
+  pre-LLM deterministic signals only. Summary is the default; `off` only when the
+  baseline is already strong; `full` requires BOTH a clear deterministic analytical
+  weakness AND sufficient selected-document evidence AND ≥2 independent
+  opportunity signals AND predicted incremental gain > `EVIDENTIA_ROUTER_FULL_GAIN_THRESHOLD`.
+  A custom persona, a single contradiction, a large corpus, or a slightly-low
+  confidence never force full. On the v1 benchmark this resolves every scenario to
+  summary (see calibration below); full stays a manual mode.
 
 Currently benchmarked model: **gpt-4o-mini**. Keys live only in `backend/.env`
 (git-ignored); the app works fully offline with no key.
@@ -90,25 +96,51 @@ Currently benchmarked model: **gpt-4o-mini**. Keys live only in `backend/.env`
 
 Full-mode structural gate now runs before repair.
 
-| mode | overall (±std) | grounding | narrative | structural | schema | halluc |
-|------|----------------|-----------|-----------|------------|--------|--------|
-| deterministic | 93.8 (4.15) | 93.9 | 93.8 | — | 1.0 | 0 |
-| summary | 94.9 (3.45) | 93.9 | 95.9 | — | 1.0 | 0 |
-| full | 94.4 (3.58) | 93.9 | 95.0 | 76.5 | 1.0 | 0 |
+| mode | overall (±std) | grounding | narrative | structural | latency | cost |
+|------|----------------|-----------|-----------|------------|---------|------|
+| deterministic | 93.8 (4.15) | 93.9 | 93.8 | — | ~1 ms | $0 |
+| summary | 95.4 (3.10) | 93.9 | 96.9 | — | 5.4 s | $0.0078 |
+| full | 94.8 (3.29) | 93.9 | 95.7 | 77.0 | 24.1 s | $0.0295 |
+| auto | 94.9 (3.76) | 93.9 | 96.0 | — | 5.2 s | $0.0077 |
 
-- **Structural gate (full):** baseline structural 67.5 → pure candidate 80.9 →
-  **final 76.5** (guardrails held back non-improving/regressing gains).
-  **Structural regressions 1 → 0** after the gate; 0 grounding regressions; schema
-  1.0. Accepted 27/66 components (50 risk items, 7 workflow items); 39 components
-  reverted to deterministic. 0 analytical fallbacks.
-- **Full vs deterministic:** win/tie/loss **6/14/2** (0 grounding losses).
-  **Full vs summary:** **1/11/10**, incremental gain **−0.48** at ~3.8× cost
-  ($0.029 vs $0.0077; cost/accepted-item $0.00051). → Full mode's analytical
+Schema-valid 1.0 and 0 hallucination warnings in every mode. `auto` routes all 22
+scenarios to summary (its numbers differ from the summary row only by LLM run-to-run
+variance).
+
+- **Structural gate (full):** baseline structural 67.5 → pure candidate ~80.9 →
+  **final 77.0** (guardrails held back non-improving/regressing gains).
+  **Structural regressions 0 after gate** (1 → 0 in a prior run); 0 grounding
+  regressions; schema 1.0. Accepted 27/66 components (59 items); rest reverted to
+  deterministic. 0 analytical fallbacks.
+- **Full vs deterministic:** win/tie/loss **5/15/2** (0 grounding losses).
+  **Full vs summary:** **2/8/12**, incremental gain **−0.54** at ~3.8× cost
+  ($0.0295 vs $0.0078; cost/accepted-item $0.0005). → Full mode's analytical
   changes are safe but rarely beat summary; **summary remains the default sweet
   spot** and auto-routing should stay conservative about full.
 - **Ground-truth match:** exact-citation **0.833**, family **1.0**, document
   **1.0**, risk-concept recall **0.889** (identical across modes — generation is
   deterministic).
+
+## Router calibration (oracle + policy search, v1)
+
+`scripts/calibrate_router.py` (offline) computes an oracle upper bound and compares
+policies before tuning any threshold. Verified on the 4-mode benchmark:
+
+- **Oracle** (best per-scenario mode, ε=0.2 ties preferring cheaper): avg overall
+  **95.47** vs always-summary **95.36** → **gain only +0.12** (< 0.2). Oracle picks
+  full in just **2/22** scenarios; **full is Pareto-dominated** (frontier =
+  {deterministic, summary}).
+- **Policy comparison:** always-summary 95.36 (cost $0.0078, worst-regression 0.0,
+  constraints ✓); **previous aggressive auto 95.02** (worse than summary, cost
+  $0.0259, worst-regression 2.8, routed 18/22 to full, constraints ✗);
+  **proposed calibrated router = always-summary** (routes 22/22 → summary,
+  constraints ✓). No `full_gain_threshold` in {0.0…1.0} beats summary by 0.2.
+- **Leave-one-category-out:** every held-out category picks threshold 0.0, gain 0.0
+  — the router generalizes (not overfit to scenario IDs).
+- **Verdict:** benchmark evidence does **not** justify automatic full routing. Auto
+  resolves to summary by default; full is kept as an explicit manual mode. The
+  conservative full-eligibility mechanism exists and is unit-tested, but its
+  conjunction never fires on the current corpus.
 
 ## Upstream fix impact (insufficient-evidence before vs after)
 
@@ -122,21 +154,22 @@ Full-mode structural gate now runs before repair.
 
 ## Tests
 
-- **66 passing** backend unit tests: `python -m pytest -q` (from `backend/` with
-  the venv active). Cover the mode router, quality/grounding scoring, narrative
-  scoring, the narrative gate, the grounding-repair relevance scorer, evidence-first
-  generation / evidence-support scorer, the **structural gate + item reconciliation**
-  (`test_structural_gate.py`), and the **four match metrics**
-  (`test_expected_match_metrics.py`).
+- **68 passing** backend unit tests: `python -m pytest -q` (from `backend/` with
+  the venv active). Cover the **calibrated conservative router** (`test_mode_router.py`),
+  quality/grounding scoring, narrative scoring, the narrative gate, the
+  grounding-repair relevance scorer, evidence-first generation / evidence-support
+  scorer, the structural gate + item reconciliation, and the four match metrics.
 
 ## Open concerns
 
 - **Evidence/structural matching is lexical, not semantic** (support, repair, and
   structural scorers). Deterministic by design for now; next step is category/persona
   affinity refinement or embeddings (still no LLM call).
-- **Full mode is not worth its cost** on the current corpus: −0.48 overall vs
-  summary at ~3.8× cost, with only 1/22 wins. The structural gate makes it *safe*
-  (0 structural/grounding regressions) but auto-routing should keep it rare.
+- **Auto never routes to full on the current corpus** (calibration verdict: full is
+  Pareto-dominated, oracle gain only +0.12). This is intentional; full stays a manual
+  mode. Re-run `scripts/calibrate_router.py` if the corpus/model changes — the
+  conservative full-eligibility mechanism will start selecting full when the evidence
+  justifies it.
 - **Exact-citation match is 0.833** because a risk binds to the highest-signal
   section in its (correct) source document — `document`/`family` match are 1.0. The
   four split metrics now make this distinction explicit.

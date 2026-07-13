@@ -1,57 +1,54 @@
 # Evidentia — Session Handoff
 
 _Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-13 (full-mode structural gate)._
+_Last updated: 2026-07-13 (auto-router calibration)._
 
 ## Where things stand
 
 Backend calibration is complete and green. Pipeline is deterministic-first with
-optional LLM refinement (off/summary/full/auto), a field-level narrative quality
-gate, a **full-mode structural quality gate**, source-constrained (evidence-first)
-risk/workflow generation, and a deterministic grounding-repair stage. Evaluation
-splits `groundingScore` and `narrativeUtilityScore`.
+optional LLM refinement (off/summary/full/auto), a field-level narrative gate, a
+full-mode structural quality gate, source-constrained (evidence-first) generation,
+and deterministic grounding repair. `auto` is now a **calibrated conservative
+router** that resolves to summary on the whole benchmark; full is a manual mode.
 
-- **66 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
+- **68 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
 - Benchmarked model: **gpt-4o-mini**. App works with no key (deterministic).
 
-## Just completed — full-mode structural quality gate
+## Just completed — auto-router calibration
 
-Full mode used to overwrite the deterministic persona brief / workflow / risks with
-no proof the change was better. Now (`agents/structural_gate.py`):
+Rewrote `agents/mode_router.py` to route from **pre-LLM deterministic signals only**
+(deterministic structural + narrative scores, doc complexity, contradictions,
+persona complexity, confidence, citation coverage, grounded risk/step counts,
+dropped risks, insufficient-evidence items, source mismatch, evidence-support avg/min).
+Full is eligible ONLY with a clear analytical weakness AND sufficient
+selected-document evidence AND ≥2 opportunity signals AND predicted gain >
+`EVIDENTIA_ROUTER_FULL_GAIN_THRESHOLD`. Custom persona / one contradiction / big
+corpus / slightly-low confidence never force full; ties prefer the cheaper mode.
+Routing telemetry: `routingReason/Signals/Confidence`, `predictedIncrementalGain`,
+`selectedMode`, `alternativeMode`, `fullEligibilityChecks`.
 
-- The deterministic analytical baseline (persona, workflow, risks, citations,
-  metrics, evidence-support telemetry, contradictions) is preserved; the LLM output
-  is built as a *separate candidate*.
-- Deterministic structural scorers grade persona (persona/market/source-topic
-  relevance + precision), workflow and risks (evidence support, citation validity,
-  source ownership, completeness/specificity, duplicates, contradiction awareness,
-  severity consistency, unsupported/N-A counts).
-- Item-level reconciliation preserves strong deterministic items, accepts genuinely
-  better/new grounded items, rejects unsupported/weaker/duplicate/generic — no filler.
-- Each component (personaBrief, workflowSteps, risks) is accepted only when its
-  structural score is strictly higher AND grounding, citation accuracy, warnings,
-  source-doc mismatch, N/A count, and schema validity don't regress. Ties keep
-  deterministic. Then repair → re-bind → recompute metrics → narrative gate.
-- Telemetry: deterministic/candidate/final structural score, gate decision,
-  accepted/rejected components + item counts, rejection reasons, analytical fallback.
-- Runner adds `--runs`, `--scenario`/`--category`, mean/std, win/tie/loss, structural
-  regressions before/after gate, incremental gain vs summary, cost per accepted
-  improvement. `expectedRiskRecall` split into 4 metrics (exact matching kept).
+`scripts/calibrate_router.py` (offline, no threshold tuning first): oracle analysis
++ policy comparison (always-{det,summary,full}, previous aggressive auto, proposed,
+oracle) under hard cost/latency/regression constraints, threshold grid search, and
+leave-one-category-out validation.
 
 ## Verified results (v1, gpt-4o-mini, 22 scenarios)
 
-| mode | overall (±std) | grounding | narrative | structural |
-|------|----------------|-----------|-----------|------------|
-| deterministic | 93.8 (4.15) | 93.9 | 93.8 | — |
-| summary | 94.9 (3.45) | 93.9 | 95.9 | — |
-| full | 94.4 (3.58) | 93.9 | 95.0 | 76.5 |
+| mode | overall (±std) | grounding | narrative | latency | cost |
+|------|----------------|-----------|-----------|---------|------|
+| deterministic | 93.8 (4.15) | 93.9 | 93.8 | ~1 ms | $0 |
+| summary | 95.4 (3.10) | 93.9 | 96.9 | 5.4 s | $0.0078 |
+| full | 94.8 (3.29) | 93.9 | 95.7 | 24.1 s | $0.0295 |
+| auto | 94.9 (3.76) | 93.9 | 96.0 | 5.2 s | $0.0077 |
 
-- Structural gate (full): baseline 67.5 → candidate 80.9 → **final 76.5**;
-  **structural regressions 1 → 0**; 0 grounding regressions; accepted 27/66
-  components (50 risk + 7 workflow items).
-- Full vs deterministic 6/14/2; **full vs summary 1/11/10, −0.48 at ~3.8× cost** →
-  summary stays the default; keep auto-routing conservative about full.
-- Match metrics: exact 0.833, family 1.0, document 1.0, concept recall 0.889.
+- **Oracle** avg 95.47 vs always-summary 95.36 → **gain +0.12** (< 0.2). Full wins
+  in only 2/22; **full is Pareto-dominated** (frontier = {deterministic, summary}).
+- Previous aggressive auto: 95.02 (worse than summary), $0.0259, 18/22→full,
+  constraints ✗. **Proposed router = always-summary** (22/22→summary), constraints ✓.
+  No threshold beats summary by 0.2; LOCO gain 0.0 in every category.
+- **Verdict:** evidence does not justify automatic full routing → auto defaults to
+  summary; full kept as a manual mode. Structural gate keeps full *safe* (full vs
+  summary 2/8/12, −0.54 at ~3.8× cost; 0 structural/grounding regressions).
 
 ## Earlier — source-constrained generation (upstream fix)
 
@@ -65,8 +62,9 @@ Provenance + generation audit are telemetry-only (`*.gen-audit.csv`).
 
 1. **Matching is lexical, not semantic** (support/repair/structural scorers). Next:
    category/persona affinity refinement or embeddings (no LLM).
-2. **Full mode isn't worth its cost** (−0.48 vs summary, 1/22 wins, ~3.8× cost);
-   the structural gate makes it safe (0 regressions) but keep auto-routing rare.
+2. **Auto never routes to full on this corpus** (intentional; full is Pareto-dominated).
+   Re-run `scripts/calibrate_router.py` if the corpus/model changes — the router will
+   start selecting full when evidence justifies it.
 3. **Exact-citation match 0.833** (family/document 1.0): risks bind to the
    highest-signal section in the correct document; the 4 split metrics show this.
 
@@ -74,9 +72,9 @@ Provenance + generation audit are telemetry-only (`*.gen-audit.csv`).
 
 ```bash
 cd backend && source .venv/bin/activate
-python -m pytest -q                       # expect 66 passed
-python scripts/run_benchmark.py --modes deterministic,summary,full --runs 3 \
-  --scenario std-compliance-health,std-support-emea,custom-dpo-emea
+python -m pytest -q                       # expect 68 passed
+python scripts/run_benchmark.py --modes deterministic,summary,full,auto
+python scripts/calibrate_router.py        # oracle + policy comparison + verdict
 # frontend: npm run build
 ```
 
