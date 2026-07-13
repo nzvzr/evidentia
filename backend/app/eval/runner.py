@@ -86,6 +86,20 @@ def run_benchmark(
                     "personaBriefChanged": accepted["personaBriefChanged"],
                     "suggestedActionsAccepted": accepted["suggestedActionsAccepted"],
                     "llmFallback": accepted["llmFallback"],
+                    # field-level narrative gate
+                    "acceptedFields": tel["acceptedFields"],
+                    "rejectedFields": tel["rejectedFields"],
+                    "rejectionReasons": tel["rejectionReasons"],
+                    "acceptedFieldsCount": len(tel["acceptedFields"]),
+                    "rejectedFieldsCount": len(tel["rejectedFields"]),
+                    "narrativeGateDecision": tel["narrativeGateDecision"],
+                    "deterministicNarrativeScore": tel["deterministicNarrativeScore"],
+                    "candidateNarrativeScore": tel["candidateNarrativeScore"],
+                    "finalNarrativeScore": tel["finalNarrativeScore"],
+                    # grounding repair
+                    "ungroundedBeforeRepair": tel["ungroundedBeforeRepair"],
+                    "ungroundedAfterRepair": tel["ungroundedAfterRepair"],
+                    "evidenceRepairs": tel["evidenceRepairs"],
                     # deltas vs deterministic baseline
                     "overallDeltaVsDeterministic": round(quality["overallQualityScore"] - base_overall, 1),
                     "narrativeDeltaVsDeterministic": round(quality["narrativeUtilityScore"] - base_narrative, 1),
@@ -102,6 +116,8 @@ def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     summary: Dict[str, Any] = {}
     for mode, rows in by_mode.items():
+        total_fields = sum(x["acceptedFieldsCount"] + x["rejectedFieldsCount"] for x in rows)
+        total_accepted = sum(x["acceptedFieldsCount"] for x in rows)
         summary[mode] = {
             "count": len(rows),
             "avgOverallQualityScore": round(mean(x["overallQualityScore"] for x in rows), 1),
@@ -114,6 +130,17 @@ def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "avgActionUsefulness": round(mean(x["actionUsefulness"] for x in rows), 3),
             "avgHallucinationWarnings": round(mean(x["hallucinationWarnings"] for x in rows), 2),
             "reportsChanged": sum(1 for x in rows if x["reportChanged"]),
+            # gate + repair reporting
+            "narrativeRegressionsBeforeGate": sum(
+                1 for x in rows if x["candidateNarrativeScore"] < x["deterministicNarrativeScore"]
+            ),
+            "narrativeRegressionsAfterGate": sum(
+                1 for x in rows if x["finalNarrativeScore"] < x["deterministicNarrativeScore"]
+            ),
+            "fieldAcceptanceRate": round(total_accepted / total_fields, 3) if total_fields else 0.0,
+            "ungroundedBeforeRepair": sum(x["ungroundedBeforeRepair"] for x in rows),
+            "ungroundedAfterRepair": sum(x["ungroundedAfterRepair"] for x in rows),
+            "evidenceRepairs": sum(x["evidenceRepairs"] for x in rows),
             "avgLatencyMs": round(mean(x["latencyMs"] for x in rows), 1),
             "totalLlmCalls": sum(x["llmCalls"] for x in rows),
             "totalTokens": sum(x["inputTokens"] + x["outputTokens"] for x in rows),

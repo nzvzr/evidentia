@@ -18,8 +18,16 @@ CSV_COLUMNS = [
     "overallQualityScore", "groundingScore", "narrativeUtilityScore",
     "overallDeltaVsDeterministic", "narrativeDeltaVsDeterministic",
     "schemaValid", "citationAccuracy", "citationCoverage", "hallucinationWarnings",
-    "factualConsistency", "summaryCompleteness", "concision", "personaMarketRelevance",
-    "actionUsefulness", "actionAlignment",
+    # narrative sub-metrics
+    "summaryFactualConsistency", "summaryCompleteness", "summaryConcision",
+    "personaMarketRelevance", "actionUsefulness", "actionEvidenceAlignment",
+    "vagueLanguagePenalty", "repetitionPenalty",
+    # field-level gate
+    "deterministicNarrativeScore", "candidateNarrativeScore", "finalNarrativeScore",
+    "narrativeGateDecision", "acceptedFieldsCount", "rejectedFieldsCount",
+    # grounding repair
+    "ungroundedBeforeRepair", "ungroundedAfterRepair", "evidenceRepairs",
+    # change telemetry
     "reportChanged", "summaryChanged", "personaBriefChanged", "suggestedActionsAccepted", "llmFallback",
     "llmCalls", "contextChars", "inputTokens", "outputTokens", "estimatedCostUsd", "latencyMs",
     "contradictions", "deterministicConfidence",

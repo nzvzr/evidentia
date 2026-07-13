@@ -42,18 +42,21 @@ def main() -> None:
 
     print(f"\nWrote {stem}.json and {stem}.csv\n")
     header = (
-        f"{'mode':<14}{'overall':>8}{'ground':>8}{'narr':>7}{'nΔdet':>7}"
-        f"{'schemaOK':>9}{'halluc':>8}{'changed':>8}{'calls':>7}{'costUSD':>10}"
+        f"{'mode':<14}{'overall':>8}{'ground':>8}{'narr':>7}"
+        f"{'regB':>6}{'regA':>6}{'accept%':>8}{'ungrB':>7}{'ungrA':>7}{'calls':>7}{'costUSD':>10}"
     )
     print(header)
     print("-" * len(header))
     for mode, s in summary.items():
         print(
             f"{mode:<14}{s['avgOverallQualityScore']:>8}{s['avgGroundingScore']:>8}"
-            f"{s['avgNarrativeUtilityScore']:>7}{s['avgNarrativeDeltaVsDeterministic']:>7}"
-            f"{s['schemaValidRate']:>9}{s['avgHallucinationWarnings']:>8}{s['reportsChanged']:>8}"
+            f"{s['avgNarrativeUtilityScore']:>7}"
+            f"{s['narrativeRegressionsBeforeGate']:>6}{s['narrativeRegressionsAfterGate']:>6}"
+            f"{s['fieldAcceptanceRate']:>8}{s['ungroundedBeforeRepair']:>7}{s['ungroundedAfterRepair']:>7}"
             f"{s['totalLlmCalls']:>7}{s['totalEstimatedCostUsd']:>10}"
         )
+    print("\nregB/regA = narrative regressions before/after gate · "
+          "ungrB/ungrA = ungrounded evidence before/after repair")
 
 
 if __name__ == "__main__":
