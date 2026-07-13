@@ -14,13 +14,13 @@ import type {
 export const DEFAULT_COMPANY = "Northreach Cloud";
 
 export const AGENTS: Agent[] = [
-  { id: "ingest", name: "Document Ingest", log: "Parsed documents → 1,284 passages", dur: "0.6s" },
-  { id: "persona", name: "Persona Modeler", log: "Modeled role profile & priorities", dur: "0.4s" },
-  { id: "retrieval", name: "Semantic Retrieval", log: "Indexed & ranked 1,284 passages", dur: "1.1s" },
-  { id: "risk", name: "Risk Analyzer", log: "Flagged 4 compliance & operational risks", dur: "0.9s" },
-  { id: "synth", name: "Brief Synthesizer", log: "Composed persona brief + workflow", dur: "0.7s" },
-  { id: "cite", name: "Citation Binder", log: "Linked 26 citations to source spans", dur: "0.5s" },
-  { id: "playbook", name: "Playbook Composer", log: "Assembled exportable playbook", dur: "0.3s" },
+  { id: "ingest", name: "Document Ingest", log: "Parsing selected documents into passages", dur: "0.6s" },
+  { id: "persona", name: "Persona Modeler", log: "Modeling role profile & priorities", dur: "0.4s" },
+  { id: "retrieval", name: "Semantic Retrieval", log: "Indexing & ranking source sections", dur: "1.1s" },
+  { id: "risk", name: "Risk Analyzer", log: "Deriving evidence-grounded risks", dur: "0.9s" },
+  { id: "synth", name: "Brief Synthesizer", log: "Composing persona brief & workflow", dur: "0.7s" },
+  { id: "cite", name: "Citation Binder", log: "Binding claims to source spans", dur: "0.5s" },
+  { id: "playbook", name: "Playbook Composer", log: "Assembling the exportable playbook", dur: "0.3s" },
 ];
 
 export const CITATIONS: DemoCitation[] = [

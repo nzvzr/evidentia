@@ -8,8 +8,28 @@ export interface DemoScenario {
   input: AgentInput;
 }
 
-/** Five deterministic demo scenarios used to seed the libraries. */
+/** Deterministic demo scenarios used to seed the libraries. The first is a
+ *  curated end-to-end showcase: a regulated EMEA compliance review that surfaces
+ *  the residency gap (High) and the deprecated on-call tool (operational risk),
+ *  binds grounded citations, and produces a full executive PDF. */
 export const SCENARIOS: DemoScenario[] = [
+  {
+    id: "showcase-residency-emea",
+    title: "Compliance Officer · EMEA — Residency Review (showcase)",
+    category: "Compliance",
+    input: {
+      id: "showcase-residency-emea",
+      market: "EMEA",
+      persona: "Compliance Officer",
+      customPersona: "",
+      selectedDocumentIds: [
+        "data-residency-sovereignty-policy",
+        "incident-response-runbook",
+        "sla-uptime-commitment",
+        "security-compliance-whitepaper",
+      ],
+    },
+  },
   {
     id: "support-emea",
     title: "Support Agent · EMEA",

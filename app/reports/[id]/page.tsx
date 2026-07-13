@@ -10,6 +10,15 @@ import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
+const SEV_COLORS: Record<"High" | "Medium" | "Low", string> = {
+  High: "#c34635",
+  Medium: "#c1852b",
+  Low: "#8b8b91",
+};
+
+const INSUFFICIENT = "N/A";
+const isInsufficient = (code: string) => (code || "").trim().toUpperCase() === INSUFFICIENT;
+
 /** Agents refined by the LLM in full (llm-assisted) mode. */
 const LLM_AGENTS = new Set([
   "Persona Modeler",
@@ -167,20 +176,24 @@ export default function ReportDetailPage() {
 
             <Card>
               <SectionLabel>RECOMMENDED WORKFLOW</SectionLabel>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {report.workflowSteps.map((s, i) => (
-                  <div key={s.step} style={{ display: "flex", gap: 15, alignItems: "flex-start", padding: "15px 0", borderBottom: i < report.workflowSteps.length - 1 ? "1px solid var(--line)" : "none" }}>
-                    <div style={{ width: 26, height: 26, flex: "none", borderRadius: "50%", border: "1px solid var(--line2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
-                      {String(s.step).padStart(2, "0")}
+              {report.workflowSteps.length === 0 ? (
+                <EmptyRow text="No workflow steps could be grounded in the selected documents." />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {report.workflowSteps.map((s, i) => (
+                    <div key={s.step} style={{ display: "flex", gap: 15, alignItems: "flex-start", padding: "15px 0", borderBottom: i < report.workflowSteps.length - 1 ? "1px solid var(--line)" : "none" }}>
+                      <div style={{ width: 26, height: 26, flex: "none", borderRadius: "50%", border: "1px solid var(--line2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
+                        {String(s.step).padStart(2, "0")}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)" }}>{s.title}</div>
+                        <div style={{ fontSize: 13, color: "var(--sub)", marginTop: 3, lineHeight: 1.5 }}>{s.description}</div>
+                      </div>
+                      <EvidenceChip code={s.evidenceCode} />
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)" }}>{s.title}</div>
-                      <div style={{ fontSize: 13, color: "var(--sub)", marginTop: 3, lineHeight: 1.5 }}>{s.description}</div>
-                    </div>
-                    <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, whiteSpace: "nowrap", alignSelf: "center" }}>{s.evidenceCode}</span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </Card>
 
             <Card>
@@ -188,23 +201,31 @@ export default function ReportDetailPage() {
                 <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>RISKS &amp; WARNINGS</span>
                 <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{report.risks.length} flagged</span>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {report.risks.map((r) => {
-                  const high = r.severity === "High";
-                  return (
-                    <div key={r.title} style={{ display: "flex", gap: 14, padding: "15px 16px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--shell)" }}>
-                      <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".05em", padding: "4px 8px", borderRadius: 5, height: "fit-content", flex: "none", color: high ? "#fff" : "var(--ink)", background: high ? "var(--accent)" : "transparent", border: high ? "none" : "1px solid var(--line2)" }}>
-                        {r.severity.toUpperCase()}
-                      </span>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{r.title}</div>
-                        <div style={{ fontSize: 13, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5 }}>{r.description}</div>
-                        <div style={{ fontFamily: mono, fontSize: 11, color: "var(--accent)", marginTop: 7 }}>{r.evidenceCode} · {r.owner}</div>
+              {report.risks.length === 0 ? (
+                <EmptyRow text="No risks met the evidence-support threshold for this corpus." />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {report.risks.map((r) => {
+                    const color = SEV_COLORS[r.severity] ?? SEV_COLORS.Low;
+                    const insufficient = isInsufficient(r.evidenceCode);
+                    return (
+                      <div key={r.title} style={{ display: "flex", gap: 14, padding: "15px 16px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--shell)", borderLeft: `3px solid ${color}` }}>
+                        <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".05em", padding: "4px 8px", borderRadius: 5, height: "fit-content", flex: "none", color: "#fff", background: color }}>
+                          {r.severity.toUpperCase()}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{r.title}</div>
+                          <div style={{ fontSize: 13, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5 }}>{r.description}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                            <EvidenceChip code={r.evidenceCode} small />
+                            <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{insufficient ? "documentation gap" : r.owner}</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </Card>
           </div>
 
@@ -244,18 +265,28 @@ export default function ReportDetailPage() {
             </Card>
 
             <Card pad="24px 24px">
-              <SectionLabel>CITATIONS</SectionLabel>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {report.citations.map((c, i) => (
-                  <div key={c.id + i} style={{ display: "flex", gap: 12, padding: "13px 0", borderBottom: i < report.citations.length - 1 ? "1px solid var(--line)" : "none" }}>
-                    <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{c.id}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{c.source}</div>
-                      <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5, fontStyle: "italic" }}>&ldquo;{c.excerpt}&rdquo;</div>
-                    </div>
-                  </div>
-                ))}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>CITATIONS</span>
+                <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{report.citations.length} sources</span>
               </div>
+              {report.citations.length === 0 ? (
+                <EmptyRow text="No source citations were bound for this report." />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {report.citations.map((c, i) => (
+                    <div key={c.id + i} style={{ display: "flex", gap: 12, padding: "13px 0", borderBottom: i < report.citations.length - 1 ? "1px solid var(--line)" : "none" }}>
+                      <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{c.id}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{c.source}</div>
+                        {c.section && (
+                          <div style={{ fontFamily: mono, fontSize: 10.5, color: "var(--sub)", marginTop: 2 }}>{c.section}</div>
+                        )}
+                        <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5, fontStyle: "italic" }}>&ldquo;{c.excerpt}&rdquo;</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
 
             <div style={{ background: "#0a0a0b", color: "#f5f5f3", borderRadius: 12, padding: "24px 24px" }}>
@@ -300,6 +331,30 @@ function severityBreakdown(report: EvidentiaReport): string {
   const m = report.risks.filter((r) => r.severity === "Medium").length;
   const l = report.risks.filter((r) => r.severity === "Low").length;
   return `${h} high · ${m} med · ${l} low`;
+}
+
+function EvidenceChip({ code, small }: { code: string; small?: boolean }) {
+  if (isInsufficient(code)) {
+    return (
+      <span
+        title="No source section met the grounding threshold — this item is marked insufficient evidence rather than citing an unrelated source."
+        style={{ fontFamily: mono, fontSize: small ? 9.5 : 10, fontWeight: 600, letterSpacing: ".04em", color: "var(--sub)", background: "var(--shell)", border: "1px dashed var(--line2)", padding: "3px 7px", borderRadius: 5, whiteSpace: "nowrap", alignSelf: "center" }}
+      >
+        INSUFFICIENT EVIDENCE
+      </span>
+    );
+  }
+  return (
+    <span style={{ fontFamily: mono, fontSize: small ? 10.5 : 10, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, whiteSpace: "nowrap", alignSelf: "center" }}>
+      {code}
+    </span>
+  );
+}
+
+function EmptyRow({ text }: { text: string }) {
+  return (
+    <div style={{ fontSize: 13, color: "var(--sub)", lineHeight: 1.5, padding: "6px 0" }}>{text}</div>
+  );
 }
 
 function Card({ children, pad = "26px 28px" }: { children: React.ReactNode; pad?: string }) {

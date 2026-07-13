@@ -9,13 +9,15 @@ import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport, RiskItem } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
-const TOTAL_PAGES = 6;
 
 const SEV_COLORS: Record<RiskItem["severity"], string> = {
   High: "#c34635",
   Medium: "#c1852b",
   Low: "#8b8b91",
 };
+
+const INSUFFICIENT = "N/A";
+const isInsufficient = (code: string) => (code || "").trim().toUpperCase() === INSUFFICIENT;
 
 function formatStamp(iso: string): string {
   const d = new Date(iso);
@@ -25,6 +27,14 @@ function formatStamp(iso: string): string {
   const hh = String(d.getUTCHours()).padStart(2, "0");
   const mm = String(d.getUTCMinutes()).padStart(2, "0");
   return `${mon} ${day} ${d.getUTCFullYear()} · ${hh}:${mm} UTC`;
+}
+
+function nextReviewDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  d.setUTCDate(d.getUTCDate() + 30);
+  const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
+  return `${mon} ${String(d.getUTCDate()).padStart(2, "0")} ${d.getUTCFullYear()}`;
 }
 
 function complianceLevel(v: EvidentiaReport["metrics"]["complianceSensitivity"]): { level: number; color: string } {
@@ -83,7 +93,7 @@ export default function PrintPlaybookPage() {
           ← Back to report
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>EXPORT PREVIEW · 6-PAGE REPORT</span>
+          <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>EXPORT PREVIEW · EXECUTIVE PLAYBOOK</span>
           <button onClick={() => window.print()} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "#fff", background: "#0a0a0b", border: "none", padding: "9px 16px", borderRadius: 8, cursor: "pointer" }}>
             Print / Save as PDF
           </button>
@@ -138,7 +148,7 @@ export default function PrintPlaybookPage() {
               ))}
             </div>
 
-            <PageFooter report={report} page={1} />
+            <PageFooter report={report} section="EXECUTIVE SUMMARY" />
           </div>
         </section>
 
@@ -194,7 +204,7 @@ export default function PrintPlaybookPage() {
                 </InsightCard>
 
                 <StatCard title="Citation Coverage" big={`${metrics.citationCoverage}%`} pct={metrics.citationCoverage} sub={`${metrics.citationsUsed} sources across ${metrics.documentsAnalyzed} documents`} />
-                <StatCard title="Workflow Completeness" big={`${metrics.workflowCompleteness}%`} pct={metrics.workflowCompleteness} sub={`7 of 7 agents complete · ${report.workflowSteps.length} steps mapped`} />
+                <StatCard title="Workflow Completeness" big={`${metrics.workflowCompleteness}%`} pct={metrics.workflowCompleteness} sub={`${report.agentSteps.length} of ${report.agentSteps.length} agents complete · ${report.workflowSteps.length} steps mapped`} />
                 <StatCard title="Persona Relevance Score" big={`${metrics.personaRelevanceScore}%`} pct={metrics.personaRelevanceScore} sub={`Corpus match to the ${report.persona} profile`} />
 
                 <InsightCard title="Compliance Sensitivity">
@@ -208,12 +218,12 @@ export default function PrintPlaybookPage() {
                 </InsightCard>
               </div>
             </div>
-            <PageFooter report={report} page={2} />
+            <PageFooter report={report} section="INSIGHT DASHBOARD" />
           </div>
         </section>
 
         {/* ===== PAGE 3 · RECOMMENDED WORKFLOW ===== */}
-        <section className="print-page">
+        <section className="print-page print-flow">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -237,21 +247,21 @@ export default function PrintPlaybookPage() {
                       </div>
                       <div style={{ flex: "none", textAlign: "right" }}>
                         <div style={fieldLabel}>EVIDENCE</div>
-                        <span style={{ display: "inline-block", marginTop: 7, fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "4px 8px", borderRadius: 5, whiteSpace: "nowrap" }}>
-                          {s.evidenceCode}
-                        </span>
+                        <div style={{ marginTop: 7 }}>
+                          <EvidenceTag code={s.evidenceCode} />
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-            <PageFooter report={report} page={3} />
+            <PageFooter report={report} section="RECOMMENDED WORKFLOW" />
           </div>
         </section>
 
         {/* ===== PAGE 4 · RISK REGISTER & EVIDENCE ===== */}
-        <section className="print-page">
+        <section className="print-page print-flow">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -269,7 +279,11 @@ export default function PrintPlaybookPage() {
                   <SevBadge sev={r.severity} />
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)", lineHeight: 1.4 }}>{r.title}</span>
                   <span style={{ fontSize: 11.5, color: "var(--ink2)", lineHeight: 1.5 }}>{r.businessImpact}</span>
-                  <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, color: "var(--accent)", lineHeight: 1.4 }}>{r.evidenceCode}</span>
+                  {isInsufficient(r.evidenceCode) ? (
+                    <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, color: "var(--sub)", lineHeight: 1.4 }}>INSUFFICIENT<br />EVIDENCE</span>
+                  ) : (
+                    <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, color: "var(--accent)", lineHeight: 1.4 }}>{r.evidenceCode}</span>
+                  )}
                   <span style={{ fontSize: 11.5, color: "var(--ink2)", lineHeight: 1.5 }}>{r.recommendedFix}</span>
                   <span style={{ fontSize: 11.5, color: "var(--ink2)", lineHeight: 1.5 }}>{r.owner}</span>
                 </div>
@@ -283,12 +297,12 @@ export default function PrintPlaybookPage() {
                 ))}
               </div>
             </div>
-            <PageFooter report={report} page={4} />
+            <PageFooter report={report} section="RISK REGISTER" />
           </div>
         </section>
 
         {/* ===== PAGE 5 · SOURCE APPENDIX ===== */}
-        <section className="print-page">
+        <section className="print-page print-flow">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -308,12 +322,12 @@ export default function PrintPlaybookPage() {
                 </div>
               ))}
             </div>
-            <PageFooter report={report} page={5} />
+            <PageFooter report={report} section="SOURCE APPENDIX" />
           </div>
         </section>
 
         {/* ===== PAGE 6 · IMPLEMENTATION CHECKLIST ===== */}
-        <section className="print-page">
+        <section className="print-page print-flow">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
@@ -356,11 +370,11 @@ export default function PrintPlaybookPage() {
                 </div>
                 <div style={{ padding: "16px 18px", border: "1px solid var(--line2)", borderRadius: 9 }}>
                   <div style={fieldLabel}>NEXT REVIEW DATE</div>
-                  <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, color: "var(--ink)", marginTop: 8 }}>AUG 05 2026</div>
+                  <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, color: "var(--ink)", marginTop: 8 }}>{nextReviewDate(report.generatedAt)}</div>
                 </div>
               </div>
             </div>
-            <PageFooter report={report} page={6} />
+            <PageFooter report={report} section="IMPLEMENTATION CHECKLIST" />
           </div>
         </section>
       </div>
@@ -393,11 +407,11 @@ function PageHeader({ report, confidential = false, showMeta = true }: { report:
   );
 }
 
-function PageFooter({ report, page }: { report: EvidentiaReport; page: number }) {
+function PageFooter({ report, section }: { report: EvidentiaReport; section: string }) {
   return (
-    <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", fontFamily: mono, fontSize: 9, color: "var(--sub)", letterSpacing: ".08em" }}>
-      <span>EVIDENTIA · {report.company} · CONFIDENTIAL</span>
-      <span>PAGE {page} / {TOTAL_PAGES}</span>
+    <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", gap: 12, fontFamily: mono, fontSize: 9, color: "var(--sub)", letterSpacing: ".08em" }}>
+      <span>EVIDENTIA · {report.company} · {report.persona} · {report.market}</span>
+      <span>{section} · CONFIDENTIAL</span>
     </div>
   );
 }
@@ -416,6 +430,24 @@ function MetaCell({ label, value, mono: isMono }: { label: string; value: string
       <div style={metaLabel}>{label}</div>
       <div style={{ fontFamily: isMono ? mono : undefined, fontSize: isMono ? 11 : 13, fontWeight: isMono ? 500 : 600, marginTop: 6, lineHeight: 1.3 }}>{value}</div>
     </div>
+  );
+}
+
+function EvidenceTag({ code }: { code: string }) {
+  if (isInsufficient(code)) {
+    return (
+      <span
+        title="No source section met the grounding threshold"
+        style={{ display: "inline-block", fontFamily: mono, fontSize: 9, fontWeight: 600, letterSpacing: ".04em", color: "var(--sub)", background: "var(--shell)", border: "1px dashed var(--line2)", padding: "4px 7px", borderRadius: 5, whiteSpace: "nowrap" }}
+      >
+        INSUFFICIENT EVIDENCE
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: "inline-block", fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "4px 8px", borderRadius: 5, whiteSpace: "nowrap" }}>
+      {code}
+    </span>
   );
 }
 
