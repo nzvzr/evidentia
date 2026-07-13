@@ -183,6 +183,31 @@ summary-as-default, full-as-manual, and all backend safeguards preserved):
   evidence-gap risk + 3 `N/A` steps rendered as insufficient-evidence. `next lint`,
   `next build`, `tsc --noEmit` clean; all report/print/workspace/documents pages 200.
 
+## Deployment readiness (verified 2026-07-13)
+
+Prepared for a stable public demo (no new features). See `DEPLOYMENT.md`.
+
+- **Backend container**: `backend/Dockerfile` (+ `.dockerignore` that keeps the
+  `*.md` corpus), listens on `$PORT`, container `HEALTHCHECK` on `/health`. Pinned
+  `requirements.txt`.
+- **Health**: backend `GET /health` → `{status, version, llmEnabled, intensity,
+  dbEnabled}` (no secrets); new frontend `GET /api/health` → `{status,
+  backendConfigured, backendReachable, mode}`.
+- **Config**: env-driven CORS (`EVIDENTIA_CORS_ORIGINS`, default `*`); proxy
+  timeouts (`EVIDENTIA_BACKEND_TIMEOUT_MS` 45s for cold starts,
+  `EVIDENTIA_BACKEND_READ_TIMEOUT_MS` 8s) so a cold/unreachable backend fails fast
+  to the deterministic fallback; `next.config` `output:"standalone"` +
+  `poweredByHeader:false`. `DATABASE_URL` empty → SQLite (zero-config demo).
+- **No hardcoded localhost** in source; backend URL/keys are server-only.
+- **Verified locally (production build)**: `next lint`/`tsc`/`next build` clean;
+  backend `pytest` 68 passed; prod `next start` + backend (SQLite) E2E — frontend
+  `/api/health` `backendReachable:true`; showcase generate HTTP 200 (~6s), report
+  **persisted to SQLite and re-fetched by id**; insufficient corpus → 4 `N/A`
+  markers; all report/print/workspace/documents/library routes 200; **backend-down
+  → deterministic fallback in ~6ms**, health reports `mode:deterministic-fallback`.
+- **Cloud deploy NOT performed** (no hosting credentials/public URLs available);
+  only local production verification was done.
+
 ## Tests
 
 - **68 passing** backend unit tests: `python -m pytest -q` (from `backend/` with

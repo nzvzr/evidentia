@@ -1,36 +1,44 @@
 # Evidentia — Session Handoff
 
 _Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-13 (demo release-readiness pass)._
+_Last updated: 2026-07-13 (deployment readiness)._
 
 ## Where things stand
 
 Backend calibration is complete, verified, and **frozen** (do not extend the eval
-framework without a concrete regression). Latest work was a product-facing
-frontend/PDF release-readiness pass. Pipeline is deterministic-first with optional
+framework without a concrete regression). Latest work prepared a **stable public
+demo deployment** (no new features). Pipeline is deterministic-first with optional
 LLM refinement (off/summary/full/auto), a field-level narrative gate, a full-mode
 structural quality gate, source-constrained generation, deterministic grounding
-repair, and a calibrated conservative `auto` router (resolves to summary; full is
-manual).
+repair, and a calibrated conservative `auto` router (resolves to summary; full manual).
 
-- **68 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
-- **Frontend `next lint` / `next build` / `tsc --noEmit` clean.** App works with no
-  key (deterministic) and no Python backend (TS fallback).
+- **68 backend unit tests pass**; **frontend `next lint`/`tsc`/`next build` clean.**
+- App works with no key (deterministic) and no backend (TS fallback). Keys are
+  backend-only; `.env`/`.env.local`/`evidentia.db` git-ignored.
 - Benchmarked model: **gpt-4o-mini**. Public report schema unchanged.
 
-## Just completed — demo release-readiness (frontend/PDF)
+## Just completed — deployment readiness
 
-- `/running` loader: honest stage progress (no fake %), real-result-gated completion,
-  slow/timeout/local-fallback/error states.
-- Insufficient-evidence `N/A` items render as a distinct "INSUFFICIENT EVIDENCE"
-  marker in the report UI and PDF (not a normal citation chip).
-- Report UI: 3-colour severity scale, citation `section` shown, empty states.
-- PDF: long sections flow across pages (`.print-flow`) instead of clipping; metadata
-  footers; dynamic agent count + next-review date.
-- Added `showcase-residency-emea` demo scenario; clarified uploads are demo-only.
-- **Verified E2E** through the Next proxy → Python backend (gpt-4o-mini summary):
-  showcase = 3 risks / 5 steps / 8 citations; insufficient corpus = evidence-gap
-  risk + `N/A` steps; all pages HTTP 200.
+- `backend/Dockerfile` (+ `.dockerignore` that keeps the `*.md` corpus), listens on
+  `$PORT`, container healthcheck; pinned `requirements.txt`.
+- Enriched backend `/health`; new frontend `/api/health` (backend reachability).
+- Env-driven CORS (`EVIDENTIA_CORS_ORIGINS`); proxy timeouts
+  (`EVIDENTIA_BACKEND_TIMEOUT_MS` 45s, `EVIDENTIA_BACKEND_READ_TIMEOUT_MS` 8s);
+  `next.config` `output:"standalone"` + `poweredByHeader:false`; `DATABASE_URL`
+  empty → SQLite default.
+- `DEPLOYMENT.md`: topology, env matrix, deploy + rollback checklists, demo reset,
+  smoke test.
+- **Verified locally (prod build)**: health OK; showcase generate 200 (~6s) and
+  **persisted to SQLite + re-fetched by id**; insufficient corpus → `N/A` markers;
+  all routes 200; **backend-down → deterministic fallback ~6ms**. **Cloud deploy
+  NOT performed** (no hosting credentials/URLs) — local verification only.
+
+## Earlier — demo release-readiness (frontend/PDF)
+
+Honest `/running` loader (no fake %, timeout/fallback/error states); `N/A` rendered
+as "INSUFFICIENT EVIDENCE" (web + PDF); 3-colour severity; citation `section`; empty
+states; PDF sections flow across pages (no clipping); `showcase-residency-emea`
+scenario; uploads labelled demo-only.
 
 ## Verified backend results (v1, gpt-4o-mini, 22 scenarios)
 

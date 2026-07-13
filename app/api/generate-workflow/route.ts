@@ -51,8 +51,10 @@ export async function POST(request: Request) {
   const backendUrl = process.env.EVIDENTIA_BACKEND_URL;
   if (backendUrl) {
     try {
+      // Allow slow cold starts (free-tier hosts spin up on first request).
+      const timeoutMs = Number(process.env.EVIDENTIA_BACKEND_TIMEOUT_MS) || 45000;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 20000);
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(`${backendUrl.replace(/\/$/, "")}/api/generate-workflow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

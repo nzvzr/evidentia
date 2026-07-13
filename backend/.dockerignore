@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.local
+.env.*.local
+evidentia.db
+benchmark_results/
+.git
+.gitignore
+# NOTE: do NOT ignore *.md — app/data/documents/*.md is the source corpus.

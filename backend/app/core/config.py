@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     evidentia_db_enabled: bool = True
     jwt_secret: str = "evidentia-dev-secret"
 
+    # --- deployment ---
+    # Comma-separated allowed CORS origins, or "*" for any (keyless public demo).
+    evidentia_cors_origins: str = "*"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -77,6 +81,12 @@ class Settings(BaseSettings):
 
     def is_db_enabled(self) -> bool:
         return self.evidentia_db_enabled
+
+    def cors_origins(self) -> list[str]:
+        raw = (self.evidentia_cors_origins or "*").strip()
+        if raw == "*" or not raw:
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
 
 
 @lru_cache
