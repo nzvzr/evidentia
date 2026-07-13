@@ -1,73 +1,82 @@
 # Evidentia — Session Handoff
 
 _Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-13 (source-constrained generation)._
+_Last updated: 2026-07-13 (full-mode structural gate)._
 
 ## Where things stand
 
 Backend calibration is complete and green. Pipeline is deterministic-first with
 optional LLM refinement (off/summary/full/auto), a field-level narrative quality
-gate, **source-constrained (evidence-first) risk/workflow generation**, and a
-deterministic grounding-repair stage. Evaluation splits `groundingScore` and
-`narrativeUtilityScore`.
+gate, a **full-mode structural quality gate**, source-constrained (evidence-first)
+risk/workflow generation, and a deterministic grounding-repair stage. Evaluation
+splits `groundingScore` and `narrativeUtilityScore`.
 
-- **53 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
+- **66 backend unit tests pass.** `backend/.env` is local + git-ignored (no secrets).
 - Benchmarked model: **gpt-4o-mini**. App works with no key (deterministic).
 
-## Just completed — source-constrained generation (upstream fix)
+## Just completed — full-mode structural quality gate
 
-Root cause of the 29 `N/A` markers: `risk_analyzer` generated generic risks and
-attached evidence afterward, so many risks had no supporting selected document.
-Now generation is evidence-first:
+Full mode used to overwrite the deterministic persona brief / workflow / risks with
+no proof the change was better. Now (`agents/structural_gate.py`):
 
-- New **evidence-support scorer** (`backend/app/tools/evidence_support.py`),
-  separate from repair: selected-document ownership, risk/workflow vocabulary,
-  exact domain phrases, category affinity, persona/market relevance, negation.
-- `risk_analyzer` (rewritten) proposes risks per persona/market, then only emits
-  ones whose *owned* source section clears `EVIDENTIA_MIN_EVIDENCE_SUPPORT` (≥2
-  signals or a phrase). No filler to hit a count; one explicit evidence-gap risk
-  only when the missing docs are operationally relevant. Returns `(risks, gen_info)`
-  with internal provenance + drop/transform audit.
-- `workflow_builder` grounds each step to a preferred/topical section or converts
-  it to an evidence-gap step; returns `(steps, gen_info)`.
-- Provenance (`sourceDocumentId`, `sourceCitationId`, `matchedSignals`,
-  `generationReason`) lives in telemetry only, never the public report.
-- New telemetry: `risksGeneratedBeforeFiltering`, `groundedRisksKept`,
-  `unsupportedRisksDropped`, workflow equivalents, `insufficientEvidenceItemsFinal`,
-  `sourceDocumentMismatchCount`, `evidenceSupportScore` avg/min, `expectedRiskRecall`.
-- New `*.gen-audit.csv` + `scripts/run_benchmark.py --print-generation`.
-- `metrics.validate_schema` relaxed (risks ≤6, workflow 1–6) — backward compatible.
+- The deterministic analytical baseline (persona, workflow, risks, citations,
+  metrics, evidence-support telemetry, contradictions) is preserved; the LLM output
+  is built as a *separate candidate*.
+- Deterministic structural scorers grade persona (persona/market/source-topic
+  relevance + precision), workflow and risks (evidence support, citation validity,
+  source ownership, completeness/specificity, duplicates, contradiction awareness,
+  severity consistency, unsupported/N-A counts).
+- Item-level reconciliation preserves strong deterministic items, accepts genuinely
+  better/new grounded items, rejects unsupported/weaker/duplicate/generic — no filler.
+- Each component (personaBrief, workflowSteps, risks) is accepted only when its
+  structural score is strictly higher AND grounding, citation accuracy, warnings,
+  source-doc mismatch, N/A count, and schema validity don't regress. Ties keep
+  deterministic. Then repair → re-bind → recompute metrics → narrative gate.
+- Telemetry: deterministic/candidate/final structural score, gate decision,
+  accepted/rejected components + item counts, rejection reasons, analytical fallback.
+- Runner adds `--runs`, `--scenario`/`--category`, mean/std, win/tie/loss, structural
+  regressions before/after gate, incremental gain vs summary, cost per accepted
+  improvement. `expectedRiskRecall` split into 4 metrics (exact matching kept).
 
-## Verified results (v1, gpt-4o-mini)
+## Verified results (v1, gpt-4o-mini, 22 scenarios)
 
-| mode | overall | grounding | narrative |
-|------|---------|-----------|-----------|
-| deterministic | 93.8 | 93.9 | 93.8 |
-| summary | 95.0 | 93.9 | 96.1 |
+| mode | overall (±std) | grounding | narrative | structural |
+|------|----------------|-----------|-----------|------------|
+| deterministic | 93.8 (4.15) | 93.9 | 93.8 | — |
+| summary | 94.9 (3.45) | 93.9 | 95.9 | — |
+| full | 94.4 (3.58) | 93.9 | 95.0 | 76.5 |
 
-- Insufficient before → after: **repair had 31 invalid codes → now 0**
-  (`ungroundedBeforeRepair = 0`, `repairInsufficient = 0`). 80 risks proposed →
-  44 grounded, **36 unsupported dropped at source**; 27 deliberate evidence-gap items.
-- Expected-risk recall **0.833**; citation accuracy 1.0; schema-valid 1.0;
-  0 hallucination warnings; summary cost $0.0076.
+- Structural gate (full): baseline 67.5 → candidate 80.9 → **final 76.5**;
+  **structural regressions 1 → 0**; 0 grounding regressions; accepted 27/66
+  components (50 risk + 7 workflow items).
+- Full vs deterministic 6/14/2; **full vs summary 1/11/10, −0.48 at ~3.8× cost** →
+  summary stays the default; keep auto-routing conservative about full.
+- Match metrics: exact 0.833, family 1.0, document 1.0, concept recall 0.889.
+
+## Earlier — source-constrained generation (upstream fix)
+
+`risk_analyzer` + `workflow_builder` are evidence-first: an item is emitted only
+when an *owned* source section clears `EVIDENTIA_MIN_EVIDENCE_SUPPORT`; unsupported
+items are dropped (no filler), with one evidence-gap risk when missing docs are
+relevant. This drove repair's invalid-code count 31 → 0 (all grounded upstream).
+Provenance + generation audit are telemetry-only (`*.gen-audit.csv`).
 
 ## Open concerns / next steps
 
-1. **Matching is lexical, not semantic** (support + repair scorers). Next:
+1. **Matching is lexical, not semantic** (support/repair/structural scorers). Next:
    category/persona affinity refinement or embeddings (no LLM).
-2. **Expected-risk recall 0.833**: risks bind to the highest-signal section in the
-   right document, which may differ from the ground-truth section id. Consider
-   prefix-level ground truth if exact recall is needed.
-3. Full-mode LLM risk refinement can still add risks the deterministic scorer
-   didn't ground; generation telemetry reflects the deterministic pass. Summary
-   (default) and deterministic paths are fully source-constrained.
+2. **Full mode isn't worth its cost** (−0.48 vs summary, 1/22 wins, ~3.8× cost);
+   the structural gate makes it safe (0 regressions) but keep auto-routing rare.
+3. **Exact-citation match 0.833** (family/document 1.0): risks bind to the
+   highest-signal section in the correct document; the 4 split metrics show this.
 
 ## How to verify
 
 ```bash
 cd backend && source .venv/bin/activate
-python -m pytest -q                       # expect 53 passed
-python scripts/run_benchmark.py --modes deterministic,summary --print-generation
+python -m pytest -q                       # expect 66 passed
+python scripts/run_benchmark.py --modes deterministic,summary,full --runs 3 \
+  --scenario std-compliance-health,std-support-emea,custom-dpo-emea
 # frontend: npm run build
 ```
 

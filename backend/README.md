@@ -187,6 +187,26 @@ response fell back entirely).
 
 ### Calibration safeguards
 
+- **Full-mode structural quality gate** (`agents/structural_gate.py`). Full mode
+  keeps the complete deterministic analytical baseline (persona brief, workflow,
+  risks, citations, metrics, evidence-support telemetry, contradictions) and builds
+  the LLM output as a *separate candidate*. Deterministic structural scorers grade
+  persona (persona/market/source-topic relevance + precision), workflow and risks
+  (evidence support, citation validity, source-document ownership, operational
+  completeness / risk specificity, duplicates, contradiction awareness, severity
+  consistency, unsupported/N-A counts). Workflow and risk items are reconciled one
+  by one — strong deterministic items are preserved, genuinely better or new
+  grounded items accepted, unsupported/weaker/duplicate/generic items rejected, and
+  no filler is added to hit a count. A component (personaBrief, workflowSteps,
+  risks) is accepted only when its structural score is strictly higher AND
+  grounding, citation accuracy, warnings, source-document mismatch, N/A count and
+  schema validity do not regress; ties preserve deterministic. The gate runs before
+  grounding repair. Telemetry: `deterministic/candidate/finalStructuralScore`,
+  `structuralGateDecision`, accepted/rejected components + item counts,
+  `structuralRejectionReasons`, `fullModeAnalyticalFallback`. The benchmark reports
+  win/tie/loss vs deterministic & summary, structural regressions before/after the
+  gate, full incremental gain vs summary, and cost per accepted improvement
+  (`--runs N`, `--scenario`/`--category` filters, mean/std for quality/latency/cost).
 - **Source-constrained (evidence-first) generation** runs upstream of repair.
   `risk_analyzer` and `workflow_builder` derive each risk/step from a *selected*
   source section rather than picking a generic item and citing it afterward. A

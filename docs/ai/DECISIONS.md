@@ -91,6 +91,40 @@ overall deterministic 93.8 / summary 95.0. Rationale: a grounded risk must be
 derived from evidence the report actually cites, not patched after the fact; kept
 fully deterministic (no LLM/embeddings). Residual: matching is still lexical.
 
+### 2026-07-13 · Full-mode structural quality gate + item reconciliation
+Summary mode had a field-level narrative gate, but full mode replaced the
+deterministic persona brief, workflow steps and risks outright, with grounding
+repair only validating citation ids afterward — no proof the analytical changes
+were actually better. Added a deterministic structural gate (`agents/
+structural_gate.py`) that (1) preserves the complete deterministic analytical
+baseline, (2) builds the LLM output as a separate candidate, (3) scores persona,
+workflow and risks with dedicated deterministic structural scorers (persona:
+persona/market/source-topic relevance + precision; workflow/risks: evidence
+support, citation validity, source-document ownership, operational completeness /
+risk specificity, duplicates, contradiction awareness, severity consistency,
+unsupported/N-A counts), (4) reconciles workflow/risk items one by one (preserve
+strong deterministic items, accept genuinely better or newly-discovered grounded
+items, reject unsupported/weaker/duplicate/generic, never force a count), and (5)
+accepts each component only when its structural score is strictly higher AND
+grounding, citation accuracy, hallucination/injection warnings, source-document
+mismatch, insufficient-evidence count, and schema validity do not regress — ties
+preserve deterministic. The gate runs *before* grounding repair; repair →
+re-bind → recompute metrics → narrative polish/gate follow unchanged. Public
+report schema unchanged; all gate data is telemetry-only. Also split the benchmark
+`expectedRiskRecall` into four metrics — `expectedRiskConceptRecall`,
+`expectedSourceDocumentMatchRate`, `expectedCitationFamilyMatchRate`,
+`expectedCitationExactMatchRate` — to distinguish correct-risk/correct-document/
+different-section from wrong-document and from exact matches (exact matching kept,
+not replaced by prefix). Runner gained `--runs`, `--scenario`/`--category` filters,
+mean/std, win/tie/loss vs deterministic & summary, structural regressions before/
+after gate, incremental gain vs summary, and cost per accepted improvement.
+Verified (gpt-4o-mini, v1, 22 scenarios): structural regressions 1 → 0 after the
+gate; 0 grounding regressions; full structural 67.5 → 76.5; full vs deterministic
+6/14/2, full vs summary 1/11/10 (−0.48 at ~3.8× cost). Rationale: full-mode
+analytical changes must be provably better and non-regressing before we calibrate
+or enable auto-routing to full; the data shows summary remains the sweet spot.
+Deterministic (no LLM/embeddings) so it is explainable and unit-testable.
+
 ### 2026-07 · AI memory/handoff docs
 Added `AGENTS.md`, `.cursor/rules/evidentia-context.mdc`, and `docs/ai/*` so future
 conversations can continue without chat history. Docs are the handoff source of
