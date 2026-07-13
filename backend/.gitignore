@@ -13,3 +13,6 @@ __pycache__/
 # local databases
 *.db
 evidentia.db
+
+# benchmark outputs
+benchmark_results/

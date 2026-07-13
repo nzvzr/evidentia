@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     evidentia_max_context_chars: int = 6000
     evidentia_max_output_tokens: int = 700
     evidentia_enable_cache: bool = True
+    # minimum relevance score for the deterministic grounding-repair scorer to
+    # accept a replacement citation; below this an item is marked insufficient.
+    evidentia_repair_min_relevance: float = 2.0
+    # minimum evidence-support strength (signal terms + 2×phrases) for a risk or
+    # workflow step to be emitted as grounded from a source section.
+    evidentia_min_evidence_support: int = 2
+    # minimum predicted incremental overall-quality gain (points) for the auto
+    # router to select full mode over summary. Calibrated high on the v1 benchmark
+    # because full is on average worse than summary; see docs/ai/DECISIONS.md.
+    evidentia_router_full_gain_threshold: float = 0.2
 
     # --- persistence ---
     database_url: str = ""
@@ -43,11 +53,15 @@ class Settings(BaseSettings):
         return False
 
     def effective_intensity(self) -> str:
-        """Resolved intensity: 'off' unless the LLM is enabled and a mode is set."""
+        """Configured intensity: 'off' unless the LLM is enabled and a mode is set.
+
+        May return 'auto' — the orchestrator resolves it to off/summary/full based
+        on document/persona/confidence signals from the deterministic baseline.
+        """
         if not self.is_llm_enabled():
             return "off"
         val = (self.evidentia_llm_intensity or "summary").lower()
-        if val not in ("off", "summary", "full"):
+        if val not in ("off", "summary", "full", "auto"):
             val = "summary"
         return val
 
