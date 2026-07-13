@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     evidentia_max_context_chars: int = 6000
     evidentia_max_output_tokens: int = 700
     evidentia_enable_cache: bool = True
+    # minimum relevance score for the deterministic grounding-repair scorer to
+    # accept a replacement citation; below this an item is marked insufficient.
+    evidentia_repair_min_relevance: float = 2.0
 
     # --- persistence ---
     database_url: str = ""

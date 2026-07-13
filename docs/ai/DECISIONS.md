@@ -51,6 +51,21 @@ citations are re-bound. Metrics treat the `N/A` sentinel as honest, not unground
 Rationale: deterministic reports contained ungrounded evidence codes (31 → 0).
 Open follow-up: relevance selection is keyword-based and coarse (see PROJECT_STATE).
 
+### 2026-07-13 · Hardened grounding-repair relevance scorer
+Replaced the one-token-overlap repair heuristic (which accepted any positive
+lexical overlap) with a deterministic **IDF-weighted scorer**: generic terms
+downweighted, exact multi-word phrases rewarded, section-title matches weighted
+above excerpt, a configurable minimum-relevance threshold
+(`EVIDENTIA_REPAIR_MIN_RELEVANCE`), and a ≥2-meaningful-terms rule unless a strong
+phrase matches. Below threshold → `N/A` (insufficient evidence), never the
+least-bad citation. Added a per-repair audit trail (matched terms/phrases,
+relevance score, top-3 candidates, decision) exported in benchmark JSON/CSV only.
+Result: of 31 invalid deterministic codes, 2 are replaced with relevant citations
+and 29 are honestly marked insufficient (previously all 31 were force-mapped).
+Rationale: a valid citation ID must actually support its item; no LLM/embeddings
+yet. Known residual: scorer is lexical, so rare cross-topic matches remain (audit
+surfaces them); consider category/persona affinity or embeddings next.
+
 ### 2026-07 · AI memory/handoff docs
 Added `AGENTS.md`, `.cursor/rules/evidentia-context.mdc`, and `docs/ai/*` so future
 conversations can continue without chat history. Docs are the handoff source of

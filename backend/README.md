@@ -189,11 +189,19 @@ response fell back entirely).
 
 - **Deterministic grounding repair** runs before report assembly (both deterministic
   and LLM paths): every workflow/risk `evidenceCode` is validated against the
-  citation IDs of the selected documents; invalid codes are replaced with a
-  semantically relevant valid citation, or marked `N/A` (insufficient evidence)
-  rather than inventing a code. Citations are re-bound afterward. The benchmark
-  reports `ungroundedBeforeRepair` / `ungroundedAfterRepair` (per scenario and
-  summed per mode).
+  citation IDs of the selected documents; invalid codes are replaced using an
+  **IDF-weighted relevance scorer** (generic terms downweighted; exact multi-word
+  phrase bonus; section-title matches weighted above excerpt; configurable
+  `EVIDENTIA_REPAIR_MIN_RELEVANCE`, default 2.0; requires ≥2 meaningful matched
+  terms unless a strong phrase matches). If nothing clears the threshold the item
+  is marked `N/A` (insufficient evidence) — never the least-bad citation. Citations
+  are re-bound afterward. Every repair emits an audit record (matched terms/phrases,
+  relevance score, top-3 candidates, decision) exported in benchmark JSON and a
+  `*.audit.csv` — never in the public report. The benchmark reports
+  `ungroundedBeforeRepair`/`ungroundedAfterRepair`, `validReplacementRate`,
+  `expectedEvidenceMatchRate`, `insufficientEvidenceRate`, `lowConfidenceRepairRate`,
+  and `averageRepairRelevanceScore`. Use
+  `python scripts/run_benchmark.py --print-repairs` to inspect every repair.
 - **Field-level narrative gate**: LLM polish is applied per field (summary,
   persona-brief description, suggested actions). A candidate field is accepted only
   if its field-level narrative score is *strictly* better AND factual consistency

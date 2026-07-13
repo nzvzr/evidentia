@@ -27,6 +27,9 @@ CSV_COLUMNS = [
     "narrativeGateDecision", "acceptedFieldsCount", "rejectedFieldsCount",
     # grounding repair
     "ungroundedBeforeRepair", "ungroundedAfterRepair", "evidenceRepairs",
+    "repairReplaced", "repairInsufficient", "validReplacementRate",
+    "expectedEvidenceMatchRate", "insufficientEvidenceRate", "lowConfidenceRepairRate",
+    "averageRepairRelevanceScore",
     # change telemetry
     "reportChanged", "summaryChanged", "personaBriefChanged", "suggestedActionsAccepted", "llmFallback",
     "llmCalls", "contextChars", "inputTokens", "outputTokens", "estimatedCostUsd", "latencyMs",
@@ -64,3 +67,37 @@ def write_json(path: str, results: List[Dict[str, Any]], summary: Dict[str, Any]
 def write_csv(path: str, results: List[Dict[str, Any]]) -> None:
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(to_csv(results))
+
+
+AUDIT_COLUMNS = [
+    "scenarioId", "requestedMode", "itemType", "itemTitle", "originalEvidenceCode",
+    "replacementEvidenceCode", "repairDecision", "relevanceScore", "matchedExpected",
+    "matchedTerms", "matchedPhrases",
+]
+
+
+def to_audit_csv(results: List[Dict[str, Any]]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=AUDIT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for row in results:
+        for a in row.get("repairAudit", []):
+            writer.writerow({
+                "scenarioId": row.get("scenarioId", ""),
+                "requestedMode": row.get("requestedMode", ""),
+                "itemType": a.get("itemType", ""),
+                "itemTitle": a.get("itemTitle", ""),
+                "originalEvidenceCode": a.get("originalEvidenceCode", ""),
+                "replacementEvidenceCode": a.get("replacementEvidenceCode", ""),
+                "repairDecision": a.get("repairDecision", ""),
+                "relevanceScore": a.get("relevanceScore", ""),
+                "matchedExpected": a.get("matchedExpected", ""),
+                "matchedTerms": "; ".join(a.get("matchedTerms", [])),
+                "matchedPhrases": "; ".join(a.get("matchedPhrases", [])),
+            })
+    return buf.getvalue()
+
+
+def write_audit_csv(path: str, results: List[Dict[str, Any]]) -> None:
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(to_audit_csv(results))

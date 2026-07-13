@@ -8,8 +8,11 @@ from typing import Any, Dict, List, Optional
 from app.agents import orchestrator
 from app.agents.orchestrator import run_pipeline_ex
 from app.eval.dataset import BENCHMARK_VERSION, SCENARIOS
-from app.eval.metrics import evaluate_report
+from app.eval.metrics import available_citation_ids, evaluate_report
 from app.eval.pricing import estimate_cost
+
+# A replacement below this relevance score is treated as low-confidence.
+LOW_CONFIDENCE_RELEVANCE = 3.0
 
 # Human-facing mode name -> pipeline intensity override.
 MODE_TO_INTENSITY = {
@@ -58,6 +61,20 @@ def run_benchmark(
             quality = evaluate_report(report, docs, expected, custom)
             cost = estimate_cost(tel["model"], tel["inputTokens"], tel["outputTokens"])
             accepted = tel["acceptedLlmUpdates"]
+
+            # --- repair-audit relevance metrics ---
+            audit = tel["repairAudit"]
+            available = available_citation_ids(docs)
+            expected_codes = set(expected.get("evidenceCodes", []))
+            for a in audit:
+                a["matchedExpected"] = a["replacementEvidenceCode"] in expected_codes
+            replaced = [a for a in audit if a["repairDecision"] == "replaced"]
+            insufficient = [a for a in audit if a["repairDecision"] == "insufficient-evidence"]
+            valid_repl = sum(1 for a in replaced if a["replacementEvidenceCode"] in available)
+            expected_matches = sum(1 for a in replaced if a["replacementEvidenceCode"] in expected_codes)
+            low_conf = sum(1 for a in replaced if a["relevanceScore"] < LOW_CONFIDENCE_RELEVANCE)
+            relevance_sum = sum(a["relevanceScore"] for a in replaced)
+
             results.append(
                 {
                     "benchmarkVersion": BENCHMARK_VERSION,
@@ -100,6 +117,18 @@ def run_benchmark(
                     "ungroundedBeforeRepair": tel["ungroundedBeforeRepair"],
                     "ungroundedAfterRepair": tel["ungroundedAfterRepair"],
                     "evidenceRepairs": tel["evidenceRepairs"],
+                    "repairAudit": audit,
+                    "repairReplaced": len(replaced),
+                    "repairInsufficient": len(insufficient),
+                    "repairValidReplacements": valid_repl,
+                    "repairExpectedMatches": expected_matches,
+                    "repairLowConfidence": low_conf,
+                    "repairRelevanceSum": round(relevance_sum, 3),
+                    "validReplacementRate": round(valid_repl / len(replaced), 3) if replaced else 1.0,
+                    "expectedEvidenceMatchRate": round(expected_matches / len(replaced), 3) if replaced else 0.0,
+                    "insufficientEvidenceRate": round(len(insufficient) / len(audit), 3) if audit else 0.0,
+                    "lowConfidenceRepairRate": round(low_conf / len(replaced), 3) if replaced else 0.0,
+                    "averageRepairRelevanceScore": round(relevance_sum / len(replaced), 3) if replaced else 0.0,
                     # deltas vs deterministic baseline
                     "overallDeltaVsDeterministic": round(quality["overallQualityScore"] - base_overall, 1),
                     "narrativeDeltaVsDeterministic": round(quality["narrativeUtilityScore"] - base_narrative, 1),
@@ -107,6 +136,14 @@ def run_benchmark(
                 }
             )
     return results
+
+
+def _repl(rows: List[Dict[str, Any]]) -> int:
+    return sum(x["repairReplaced"] for x in rows)
+
+
+def _insuff(rows: List[Dict[str, Any]]) -> int:
+    return sum(x["repairInsufficient"] for x in rows)
 
 
 def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -141,6 +178,15 @@ def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "ungroundedBeforeRepair": sum(x["ungroundedBeforeRepair"] for x in rows),
             "ungroundedAfterRepair": sum(x["ungroundedAfterRepair"] for x in rows),
             "evidenceRepairs": sum(x["evidenceRepairs"] for x in rows),
+            # repair-relevance audit (pooled across scenarios)
+            "repairAudited": _repl(rows) + _insuff(rows),
+            "repairReplaced": _repl(rows),
+            "repairInsufficient": _insuff(rows),
+            "validReplacementRate": round(sum(x["repairValidReplacements"] for x in rows) / _repl(rows), 3) if _repl(rows) else 1.0,
+            "expectedEvidenceMatchRate": round(sum(x["repairExpectedMatches"] for x in rows) / _repl(rows), 3) if _repl(rows) else 0.0,
+            "insufficientEvidenceRate": round(_insuff(rows) / (_repl(rows) + _insuff(rows)), 3) if (_repl(rows) + _insuff(rows)) else 0.0,
+            "lowConfidenceRepairRate": round(sum(x["repairLowConfidence"] for x in rows) / _repl(rows), 3) if _repl(rows) else 0.0,
+            "averageRepairRelevanceScore": round(sum(x["repairRelevanceSum"] for x in rows) / _repl(rows), 3) if _repl(rows) else 0.0,
             "avgLatencyMs": round(mean(x["latencyMs"] for x in rows), 1),
             "totalLlmCalls": sum(x["llmCalls"] for x in rows),
             "totalTokens": sum(x["inputTokens"] + x["outputTokens"] for x in rows),

@@ -39,33 +39,52 @@ Currently benchmarked model: **gpt-4o-mini**. Keys live only in `backend/.env`
 - **Field-level narrative gate**: accepts an LLM field (summary / personaBrief.description /
   suggestedActions) only if it is strictly better AND factual consistency and
   grounding do not drop AND warnings do not increase; ties preserve deterministic.
-- **Deterministic grounding repair**: validates every workflow/risk `evidenceCode`
-  against selected-document citation IDs; replaces invalid codes with a relevant
-  citation or marks `N/A` (insufficient evidence) — never invents. Then re-binds.
+- **Deterministic grounding repair** (`tools/citation_tools.py`): validates every
+  workflow/risk `evidenceCode` against selected-document citation IDs; replaces
+  invalid codes using an **IDF-weighted relevance scorer** (generic terms
+  downweighted, exact multi-word phrase bonus, section-title matches weighted above
+  excerpt, configurable `EVIDENTIA_REPAIR_MIN_RELEVANCE`, ≥2 meaningful matched
+  terms unless a strong phrase). If nothing clears the threshold the item is marked
+  `N/A` (insufficient evidence) — never the least-bad citation. Every repair emits
+  an audit record (matched terms/phrases, relevance score, top-3 candidates); audit
+  is exported in benchmark JSON/CSV but never in the public report.
 - Versioned benchmark dataset (`BENCHMARK_VERSION = v1`, 22 scenarios) with
   ground-truth expectations; exports JSON + CSV.
 
-## Latest live benchmark (gpt-4o-mini, v1)
+## Last key-enabled benchmark (gpt-4o-mini, v1)
 
 | mode | overall | grounding | narrative |
 |------|---------|-----------|-----------|
 | deterministic | 93.9 | 93.9 | 93.9 |
 | summary | 95.5 | 93.9 | 97.1 |
 
-- Narrative regressions: **2 before gate, 0 after gate**.
-- Field acceptance rate: **25.8%**.
-- Ungrounded evidence codes: **31 before repair, 0 after**.
-- Cost: **22 LLM calls, $0.008164**.
+Narrative regressions 2 → 0 after gate; field acceptance 25.8%; ungrounded 31 → 0;
+22 LLM calls, $0.008164. (Requires `OPENAI_API_KEY`; not present in fresh VMs.)
+
+## Latest deterministic verification (2026-07-13, keyless)
+
+Repair scorer hardened (IDF + phrases + threshold). Deterministic benchmark (22
+scenarios; summary/full degrade to deterministic without a key):
+
+- overall **94.2**, narrative **94.6**, schema-valid rate **1.0**.
+- Grounding repair: **31 ungrounded → 0**; **2 replaced** (avg relevance 8.615,
+  `validReplacementRate` 1.0), **29 marked insufficient** (`insufficientEvidenceRate`
+  0.935); `lowConfidenceRepairRate` 0.0; `expectedEvidenceMatchRate` 0.0.
+- The stricter scorer now honestly marks unsupported risks `N/A` instead of
+  force-mapping them (the old scorer replaced all 31 with least-bad matches).
 
 ## Tests
 
-- **39 passing** backend unit tests: `python -m pytest -q` (run from `backend/`
-  with the venv active). Cover the mode router, quality/grounding scoring,
-  narrative scoring, the narrative gate, and grounding repair.
+- **44 passing** backend unit tests: `python -m pytest -q` (from `backend/` with
+  the venv active). Cover the mode router, quality/grounding scoring, narrative
+  scoring, the narrative gate, and the grounding-repair relevance scorer.
 
 ## Open concerns
 
-- **Semantic relevance of repaired citations**: the deterministic grounding repair
-  picks a replacement citation by keyword overlap, which is coarse. A repaired
-  code is valid but may not be the *most* relevant source. See
-  `docs/ai/SESSION_HANDOFF.md` for next steps.
+- **Repaired-citation relevance is lexical, not semantic.** The IDF + phrase scorer
+  is much stricter (only 2 of 31 replaced), but a residual cross-topic match is
+  still possible when two meaningful terms coincide (e.g. a rollback/migration risk
+  matched a pricing "Plan Tiers" section via `deployment`, `plan`). The audit trail
+  surfaces these. Next step: category/persona-aware affinity or embeddings (no LLM
+  call). Also consider tightening `risk_analyzer` so it doesn't select risks whose
+  source document isn't in the selected corpus (drives most `insufficient` markers).

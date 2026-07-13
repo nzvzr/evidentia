@@ -439,7 +439,9 @@ def run_pipeline_ex(
             resolved = "off"  # unexpected failure → deterministic
 
     # --- deterministic grounding repair (both paths, before assembly) ---
-    repair_info = repair_grounding(workflow_steps, risks, sections)
+    repair_info = repair_grounding(
+        workflow_steps, risks, sections, min_relevance=settings.evidentia_repair_min_relevance
+    )
     citations = citation_binder(sections, workflow_steps, risks)  # re-bind after repair
 
     # --- metrics + report assembly (deterministic) ---
@@ -557,4 +559,5 @@ def _telemetry(
         "ungroundedBeforeRepair": repair.get("before", 0),
         "ungroundedAfterRepair": repair.get("after", 0),
         "evidenceRepairs": repair.get("repairs", 0),
+        "repairAudit": repair.get("audit", []),
     }
