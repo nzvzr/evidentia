@@ -1,124 +1,81 @@
 # Evidentia — Session Handoff
 
 _Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-15 (M1 implemented + independent-review corrections applied)._
+_Last updated: 2026-07-15 (review corrections applied to the stabilization diff)._
 
 ## Where things stand
 
-**M1 is implemented and verified** (details in `PROJECT_STATE.md`; decisions
-appended to `DECISIONS.md` 2026-07-15). Everything in the
-`PLATFORM_ARCHITECTURE.md` §12 M1 gate, additive only, zero behavior change:
+**M1 remains implemented and verified.** Typed contracts, blob/job/provider seams,
+the additive ingestion schema/migration, tenant-corpus flag, and backfill are all
+unchanged. See `PROJECT_STATE.md` and the 2026-07-15 M1 entry in `DECISIONS.md`.
 
-1. **`backend/app/contracts.py`** — `RawDocument v1`, `DocIR v1`,
-   `SectionRecord v1`, `ClaimSpec v1` (+ `EvidenceBinding v1` and stubs for
-   `ClaimCandidate`/`Finding`/`Recommendation`/`CanonicalAnalysisDocument`).
-   `SectionRecord.to_pipeline_section(source_title)` is the strict projection
-   to the pipeline currency dict, test-pinned against `document_reader`.
-2. **Seams** — `BlobStore` + `DatabaseBlobStore`
-   (`app/services/blob_store.py`), `JobQueue` + `DatabaseJobQueue.enqueue`
-   (`app/services/job_queue.py`; claim/worker is M2), `SectionProvider` +
-   `DemoCorpusProvider` (`app/agents/section_provider.py`; byte-identical to
-   `document_reader`, orchestrator injection is M4).
-3. **Migration `f7c3a1b9e2d4`** — `document_versions`, `document_blobs`,
-   `document_sections`, `ingestion_jobs` + 11 additive `documents` columns.
-   Crash-safe blob/row write order + orphaned-blob reconciliation documented
-   in its docstring (the "schema PR" documentation gate). Verified: upgrade /
-   downgrade / re-upgrade; schema column-identical to `create_all`.
-   `documents.current_version_id` has **no DB-level FK** (circular pair on
-   SQLite) — integrity lives at the single atomic flip site.
-4. **Flag** `EVIDENTIA_TENANT_CORPUS_ENABLED` (default **off** = byte-for-byte
-   today; in settings + `.env.example`).
-5. **Backfill** `scripts/backfill_documents.py` — version 1 (`pending`) +
-   blob + queued job per `content_text` doc; idempotent; one doc per commit;
-   `--company-id` / `--dry-run`; verified via CLI on a migrated scratch DB.
-   `content_text` is now deprecated (removal milestone still unscheduled).
+**The pre-M2 `/running` stabilization passed independent review; its two approved
+non-blocking corrections are applied and verified.** The diff is intentionally
+still uncommitted. Remaining external steps: commit and push; only then may M2
+begin.
 
-**Independent review corrections applied (2026-07-15, all verified):**
+## Frontend fix
 
-1. The application engine (`app/db/session.py`, via `create_application_engine`)
-   now sets `PRAGMA foreign_keys=ON` on every SQLite connection — previously
-   only the test engine did, so a real document delete stranded orphaned
-   versions/blobs/jobs (reproduced, now cascade-tested through the app path).
-2. Partial unique index `uq_ingestion_jobs_live_version` (one row per
-   `version_id` while state is queued/running; `postgresql_where`+`sqlite_where`,
-   in migration + ORM). `DatabaseJobQueue.enqueue` inserts inside a SAVEPOINT:
-   the losing racer swallows the IntegrityError, keeps the caller's outer
-   transaction, and re-selects/returns the surviving job. Genuine two-session
-   race verified on PostgreSQL 16 (5 consecutive runs).
-3. Unique index `uq_documents_company_citation_prefix` on
-   `(company_id, citation_prefix)` (migration + ORM); still nullable, NULLs
-   remain distinct — pre-M3 documents coexist.
-4. Redundant indexes removed from the uncommitted migration + ORM:
-   `ix_document_sections_company_id` (leftmost prefix of
-   `ix_document_sections_company_document`) and
-   `ix_document_versions_document_id` (leftmost prefix of the unique
-   `(document_id, version_no)` constraint).
+1. `app/running/page.tsx` now keeps request result, animation completion, phase,
+   active attempt, and navigation guards explicit. Stage updates contain no side
+   effects. Successful navigation lives in its own effect and happens once after
+   both animation and persisted report id are ready.
+2. `lib/pendingRun.ts` stores a session-scoped, non-secret nonce with the existing
+   run input. Login/logout/session-loss purge already covers this key. Retry creates
+   a new nonce and clean state; legacy raw-input values remain readable once.
+3. `lib/workflowGeneration.ts` holds only live single-flight requests keyed by
+   nonce + exact input. Strict Mode replay shares one POST; real unmount aborts
+   after a zero-delay replay grace period; timeout remains 60s; settled entries are
+   deleted immediately. No report content is cached.
+4. Stale effect subscriptions/timers cannot update or navigate the active run.
+   Cleanup AbortError is ignored; timeout/network/503 remain unavailable; 429 is
+   limited; 401 redirects once; other non-OK responses are failed.
+5. Review correction A (hydration): header persona/market labels render the
+   prerendered defaults until hydration completes (`useSyncExternalStore` gate);
+   the run itself is still read from storage on the first client render, so the
+   generation effect POSTs the stored input immediately and the label re-render
+   starts no second request.
+6. Review correction B (malformed success): a 200 whose body is unparseable, not
+   an object, or lacks a non-empty string `report.id` returns the generic error
+   result (`Generation failed`) — never success, finalizing, or unavailable. Only
+   this minimum persistence/navigation contract is validated (no full schema
+   validator). See the 2026-07-15 `DECISIONS.md` entry, which also records the
+   client single-flight scope limit (one tab/mount only; cross-tab, back-nav, and
+   server-side replay dedupe belong to a later backend idempotency milestone).
+7. `app/running/page.test.tsx` holds 22 behavioral React/Strict Mode tests
+   (six malformed-200 cases + two hydration-label tests added). Vitest supports
+   jsdom component tests; React Testing Library is a dev dependency.
 
-Tests: **311 passed, 3 skipped** (PostgreSQL-only) — 274 pre-existing,
-all untouched, +38 new (`test_contracts.py` 13,
-`test_ingestion_schema_and_seams.py` 24, one PostgreSQL enqueue-race test in
-`test_concurrency.py`). Concurrency suite verified 16/16 on PostgreSQL 16;
-migration upgrade/downgrade/re-upgrade verified on SQLite **and** PostgreSQL;
-metadata↔migration drift check clean for every M1 table. Frontend untouched;
-public `EvidentiaReport` schema untouched; documents API response key set
-pinned unchanged by test.
+## Verification (re-run after the review corrections)
 
-## Next step: M2 — upload + ingestion spine (MD/TXT)
+- Focused: `npx vitest run app/running/page.test.tsx --reporter=verbose` — 22/22.
+- Full: `npm test` — 28/28 across 2 files.
+- Two shuffled runs (`--sequence.shuffle.tests`) — 22/22 both times.
+- `npm run lint` — pass, 0 errors; the same 6 pre-existing set-state-in-effect
+  warnings (the hydration gate uses `useSyncExternalStore`, adding none).
+- `npx tsc --noEmit` — pass.
+- `npm run build` — pass (Next 16.2.10 production build; `/running` static).
+- `git diff --check` — pass.
+- Authenticated headless-Chrome smoke against live FastAPI + `next start` (prod):
+  fresh registered user, **non-default** selection (Support Agent / US), hard load
+  of `/running`: **zero hydration warnings and zero console errors**, header showed
+  the stored labels, exactly one POST `/api/generate-workflow`, automatic redirect
+  to `/reports/{uuid}`, persisted report count 0→1.
+- Earlier same-day smoke (initial diff): dev-restart run and backend-down run
+  (one POST/503, honest `Generation unavailable`, no report route) still stand.
 
-Per `DOCUMENT_INGESTION_ARCHITECTURE.md` §15: multipart upload endpoint
-(magic-byte sniffing, caps, dedupe, quotas, rate limits), the job worker +
-state machine (**tenant-fair claims, claim-time `attempts` increments, stale
-`running` requeue via `heartbeat_at`** — requirements recorded on the
-`IngestionJob` model), MD (`markdown-it-py`) + TXT parsers → DocIR →
-sectionizer, status surfaced in the documents UI/serialization. The backfilled
-`pending` versions + `queued` jobs are sitting in the queue waiting for
-exactly this worker.
+## Scope and next step
 
-## Unresolved (decide later, recorded where noted)
+- Backend generation/persistence, report page, auth, public report schema, and M1
+  ingestion foundations were untouched.
+- No M2 upload, parsing, sectionization, worker, or customer-corpus behavior exists
+  in this diff.
+- Next action: commit and push the reviewed, corrected stabilization diff; only
+  then may M2 begin.
 
-1. CAD migration milestone — triggered by the first renderer needing more than
-   `EvidentiaReport` (platform doc §2).
-2. `report.company` = tenant name — behind the corpus flag, product sign-off
-   at M4 (`DECISIONS.md`).
-3. M9 FTS `tsvector` column: early nullable column vs. maintenance-window
-   rewrite — decide at M9 entry (NOT added in the M1 migration).
-4. `documents.content_text` removal milestone after backfill verification.
-5. DOCX renderer library choice (R-track); OCR timing; retention defaults;
-   Stage-3 embedding model (deferred until `retrieval_misses` data).
-6. Review notes deferred by the M1 correction pass (implement only when their
-   milestone arrives): windowed backfill iteration if real corpus size requires
-   it; optionally catch concurrent-backfill uniqueness conflicts cleanly;
-   revisit `SectionRecord` hashing + nullable `category` before it becomes a
-   live M2/M4 production contract; `TenantCorpusProvider` carries
-   tenancy/version scope via its constructor or a future typed context.
+## M2 reminder (still blocked)
 
-## How to verify this session
-
-```bash
-cd backend && python -m pytest -q        # 311 passed, 3 skipped (SQLite)
-python -m pytest tests/test_contracts.py tests/test_ingestion_schema_and_seams.py -q
-DATABASE_URL=sqlite:///./_scratch.db python -m alembic upgrade head   # then downgrade -1 / upgrade head
-DATABASE_URL=sqlite:///./_scratch.db python scripts/backfill_documents.py --dry-run
-```
-
-## Reminders
-
-- Append to `DECISIONS.md`; never rewrite past entries.
-- Don't break the public `EvidentiaReport` schema — and don't casually *add*
-  fields either: every proposed field must answer "CAD concept, module
-  extension, or renderer concern?" (platform doc §2).
-- Engine code must never branch or string-match on a taxonomy label.
-- Retrieval proposes; the deterministic gate disposes.
-- Renderers: pure transformation of an immutable snapshot.
-- Crash-safe write order is binding: version row (`pending`) → blob put →
-  work; `current_version_id` flips only to `ready` versions.
-- A version is visible to generation completely or not at all; backfilled
-  versions stay `pending` until the M2 worker sectionizes them.
-- Reports must carry `source_versions` + `engine_versions` from the first
-  customer report (M4); provenance cannot be added retroactively.
-- `company_id` never comes from client input — only from `CompanyContext`.
-- Authenticated routes never fall back to the TypeScript pipeline.
-- A 200 from generation means **persisted** — never return an unsaved report.
-- **Take the lock, then re-read with `populate_existing`, then decide.**
-- **Timing proofs need `time.perf_counter()`**, not `time.monotonic()`.
-- **Never unset `EVIDENTIA_BACKEND_URL` as a rollback** — it disables auth.
+M2 is the MD/TXT upload + ingestion spine: multipart validation/caps/dedupe/quotas,
+tenant-fair worker claims, heartbeat/stale-running recovery, parsers → DocIR →
+sectionizer, and document status UI. Preserve the platform invariants in
+`PLATFORM_ARCHITECTURE.md` and `DOCUMENT_INGESTION_ARCHITECTURE.md`.

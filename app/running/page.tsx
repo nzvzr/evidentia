@@ -1,13 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import AppShell from "@/components/AppShell";
 import { AGENTS } from "@/lib/demoReport";
-import { readPendingRun } from "@/lib/pendingRun";
+import { createPendingRun, readPendingRun, writePendingRun, type PendingRun } from "@/lib/pendingRun";
 import { buildAgentInput } from "@/lib/workspaceMapping";
-import { readSelection } from "@/lib/useWorkspace";
-import type { AgentInput, EvidentiaReport } from "@/lib/types";
+import { DEFAULT_SELECTION, readSelection } from "@/lib/useWorkspace";
+import { acquireGeneration } from "@/lib/workflowGeneration";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -15,7 +15,20 @@ const mono = "var(--font-plex-mono), monospace";
 // progress); completion is gated on the *actual* report, never on the timer.
 const STAGE_MS = 780;
 const SLOW_AFTER_MS = 22000; // surface a "taking longer" notice
-const FETCH_ABORT_MS = 60000; // stop waiting on the network
+
+// /running is statically prerendered, so the server HTML can only ever carry
+// the labels derived from the default workspace selection.
+const DEFAULT_LABEL_INPUT = buildAgentInput(DEFAULT_SELECTION);
+
+// Hydration detector: the store never changes, so this reads `false` exactly
+// once — during server rendering and the matching hydration render.
+const noopSubscribe = () => () => {};
+const useHydrated = () =>
+  useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
 
 /**
  * There is deliberately no local-pipeline fallback here any more.
@@ -25,128 +38,119 @@ const FETCH_ABORT_MS = 60000; // stop waiting on the network
  * authenticated-looking report for a session nobody validated. If the server
  * cannot generate it, we say so and offer a retry.
  */
-type Phase = "running" | "finalizing" | "slow" | "unavailable" | "limited" | "expired" | "error";
+type Phase = "running" | "finalizing" | "slow" | "success" | "unavailable" | "limited" | "expired" | "error";
+
+const isTerminal = (phase: Phase) =>
+  phase === "error" || phase === "unavailable" || phase === "limited" || phase === "expired";
 
 export default function RunningPage() {
   const router = useRouter();
+  const [run, setRun] = useState<PendingRun>(() =>
+    readPendingRun() ?? createPendingRun(buildAgentInput(readSelection())),
+  );
   const [stageIdx, setStageIdx] = useState(0);
   const [phase, setPhase] = useState<Phase>("running");
-  const [reportReady, setReportReady] = useState(false);
-  const [meta, setMeta] = useState({ personaLabel: "Persona", marketLabel: "Market" });
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [animationComplete, setAnimationComplete] = useState(false);
+  const activeRunRef = useRef(run.id);
+  const navigatedRef = useRef(false);
+  const loginRedirectedRef = useRef(false);
+
+  // The header labels come from browser storage, but the prerendered server
+  // HTML can only contain the default selection, so rendering the stored
+  // labels during the hydration render would mismatch it. Labels therefore
+  // stay on the defaults until hydration completes. Only the *labels* wait:
+  // `run` (above) is initialized from storage on the client immediately, and
+  // effects never run on the server, so the generation effect always POSTs
+  // the actual stored input — the post-hydration label re-render starts no
+  // second request.
+  const hydrated = useHydrated();
+
+  const labelInput = hydrated ? run.input : DEFAULT_LABEL_INPUT;
+  const personaLabel = labelInput.customPersona?.trim()
+    ? labelInput.customPersona.trim()
+    : labelInput.persona || "Persona";
+  const marketLabel = labelInput.market || "Market";
 
   useEffect(() => {
-    const input: AgentInput = readPendingRun() ?? buildAgentInput(readSelection());
-    const personaLabel = input.customPersona?.trim() ? input.customPersona.trim() : input.persona || "Persona";
-    setMeta({ personaLabel, marketLabel: input.market || "Market" });
-
+    activeRunRef.current = run.id;
+    let subscribed = true;
     const total = AGENTS.length;
-    let report: EvidentiaReport | null = null;
-    let stagesDone = false;
-    let navigated = false;
-
-    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    let visibleStage = 0;
+    let requestPending = true;
     let stageTimer: ReturnType<typeof setInterval> | null = null;
+    let slowTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const markReady = () => {
-      if (report) setReportReady(true);
-    };
-
-    const fail = (next: Phase) => {
-      if (stageTimer) clearInterval(stageTimer);
-      timers.forEach(clearTimeout);
-      setPhase(next);
-    };
-
-    const finish = () => {
-      if (navigated || !report || !stagesDone) return;
-      navigated = true;
-      if (stageTimer) clearInterval(stageTimer);
-      timers.forEach(clearTimeout);
-      // The report is already persisted to the tenant by the backend. It is
-      // deliberately NOT mirrored into localStorage: that global key survived
-      // logout and leaked one account's report content to the next user.
-      router.push(`/reports/${report.id}`);
-    };
-
-    // Generate server-side. The server is the only thing that can validate the
-    // session and persist to the tenant, so a failure here is a real failure —
-    // it is never papered over with a locally generated report.
-    const controller = new AbortController();
-    const abortTimer = setTimeout(() => controller.abort(), FETCH_ABORT_MS);
-    timers.push(abortTimer);
+    const ownsRun = () => subscribed && activeRunRef.current === run.id;
+    const generation = acquireGeneration(run);
 
     (async () => {
-      try {
-        const res = await fetch("/api/generate-workflow", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-          signal: controller.signal,
-        });
+      const result = await generation.promise;
+      requestPending = false;
+      if (!ownsRun() || result.kind === "cancelled") return;
+      if (slowTimer) clearTimeout(slowTimer);
 
-        if (res.status === 401) {
-          // Session expired or revoked — send them back through login.
-          router.push("/login?next=/workspace");
-          return;
-        }
-        if (res.status === 429) {
-          fail("limited");
-          return;
-        }
-        if (res.status === 503) {
-          fail("unavailable");
-          return;
-        }
-        if (!res.ok) {
-          fail("error");
-          return;
-        }
-
-        report = (await res.json()) as EvidentiaReport;
-      } catch {
-        // Network failure or timeout: honestly unavailable, not silently faked.
-        fail("unavailable");
+      if (result.kind === "success") {
+        setReportId(result.report.id);
+        setPhase((current) => (isTerminal(current) ? current : "success"));
         return;
-      } finally {
-        clearTimeout(abortTimer);
       }
 
-      markReady();
-      finish();
+      if (stageTimer) clearInterval(stageTimer);
+      setPhase(result.kind);
     })();
 
-    const isTerminal = (p: Phase) =>
-      p === "error" || p === "unavailable" || p === "limited" || p === "expired";
-
-    // 2) advance the visible pipeline stages (holds on the final stage).
+    // Presentational only: the backend does not stream individual agent progress.
     stageTimer = setInterval(() => {
-      setStageIdx((prev) => {
-        const next = prev + 1;
-        if (next >= total - 1) {
-          if (stageTimer) clearInterval(stageTimer);
-          stagesDone = true;
-          setPhase((p) => (isTerminal(p) ? p : report ? "running" : "finalizing"));
-          finish();
-          return total - 1;
-        }
-        return next;
-      });
+      if (!ownsRun()) return;
+      visibleStage = Math.min(visibleStage + 1, total - 1);
+      setStageIdx(visibleStage);
+      if (visibleStage === total - 1) {
+        if (stageTimer) clearInterval(stageTimer);
+        setAnimationComplete(true);
+        setPhase((current) => (isTerminal(current) || current === "success" ? current : "finalizing"));
+      }
     }, STAGE_MS);
 
-    // 3) honest long-running notice. There is no hard-timeout fallback: if the
-    //    request never completes, the abort above surfaces "unavailable".
-    timers.push(
-      setTimeout(() => {
-        if (!report && !navigated) setPhase((p) => (isTerminal(p) ? p : "slow"));
-      }, SLOW_AFTER_MS),
-    );
+    slowTimer = setTimeout(() => {
+      if (ownsRun() && requestPending) {
+        setPhase((current) => (isTerminal(current) || current === "success" ? current : "slow"));
+      }
+    }, SLOW_AFTER_MS);
 
     return () => {
+      subscribed = false;
       if (stageTimer) clearInterval(stageTimer);
-      timers.forEach(clearTimeout);
-      controller.abort();
+      if (slowTimer) clearTimeout(slowTimer);
+      generation.release();
     };
-  }, [router]);
+  }, [run]);
+
+  // Successful navigation is deliberately isolated from request and animation
+  // callbacks. The backend has already persisted the report at this point.
+  useEffect(() => {
+    if (!reportId || !animationComplete || isTerminal(phase) || navigatedRef.current) return;
+    navigatedRef.current = true;
+    router.push(`/reports/${reportId}`);
+  }, [animationComplete, phase, reportId, router]);
+
+  useEffect(() => {
+    if (phase !== "expired" || loginRedirectedRef.current) return;
+    loginRedirectedRef.current = true;
+    router.push("/login?next=/workspace");
+  }, [phase, router]);
+
+  const retry = () => {
+    const nextRun = writePendingRun(run.input);
+    activeRunRef.current = nextRun.id;
+    navigatedRef.current = false;
+    loginRedirectedRef.current = false;
+    setStageIdx(0);
+    setPhase("running");
+    setReportId(null);
+    setAnimationComplete(false);
+    setRun(nextRun);
+  };
 
   const total = AGENTS.length;
   const lastStage = stageIdx >= total - 1;
@@ -193,7 +197,7 @@ export default function RunningPage() {
             <span style={{ fontWeight: 700, fontSize: 14.5 }}>Running workflow</span>
             <span style={{ color: "rgba(255,255,255,.25)" }}>/</span>
             <span style={{ fontSize: 13.5, color: "rgba(245,245,243,.6)" }}>
-              {meta.personaLabel} · {meta.marketLabel}
+              {personaLabel} · {marketLabel}
             </span>
           </div>
           <span style={{ fontFamily: mono, fontSize: 11.5, color: statusColor }}>{statusText}</span>
@@ -210,7 +214,7 @@ export default function RunningPage() {
             {/* stage-segmented indicator (reflects completed pipeline stages, not a synthetic %) */}
             <div style={{ display: "flex", gap: 5, margin: "26px 0 30px" }}>
               {AGENTS.map((a, i) => {
-                const done = phase !== "error" && (lastStage ? (i < total - 1 || reportReady) : i < stageIdx);
+                const done = !failed && (lastStage ? (i < total - 1 || !!reportId) : i < stageIdx);
                 const active = phase !== "error" && !done && i === stageIdx;
                 return (
                   <div
@@ -237,14 +241,14 @@ export default function RunningPage() {
                       : "Something went wrong while generating this report."}
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={() => window.location.reload()} style={btnPrimary}>Try again</button>
+                  <button onClick={retry} style={btnPrimary}>Try again</button>
                   <button onClick={() => router.push("/workspace")} style={btnGhost}>Back to workspace</button>
                 </div>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 {AGENTS.map((a, i) => {
-                  const isDone = lastStage ? (i < total - 1 || reportReady) : i < stageIdx;
+                  const isDone = lastStage ? (i < total - 1 || !!reportId) : i < stageIdx;
                   const isActive = !isDone && i === stageIdx;
                   const isPending = !isDone && !isActive;
                   const stateText = isDone ? "Complete" : isActive ? "Running" : "Queued";

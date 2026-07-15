@@ -41,6 +41,22 @@ which is explicitly anonymous (it never reads session cookies), takes a fixed
 showcase input (so it is not a free open-ended LLM endpoint), reads only the public
 demo corpus, persists nothing, and is IP-rate-limited.
 
+## Authenticated frontend generation lifecycle
+
+One workspace click creates a session-scoped, non-secret run nonce alongside its
+input. `/running` uses that nonce plus the input as the key for an in-memory
+single-flight request that exists only while the POST is pending. This lets React
+Strict Mode's development setup/cleanup/setup replay subscribe to one request;
+settled entries are removed immediately, and a real unmount aborts after a
+zero-delay replay grace period. The nonce is purged on login/logout/session loss,
+so a flight cannot be reused across sessions; report content is never cached.
+
+Request completion and the seven-stage presentational animation are explicit,
+independent state. A dedicated effect navigates once, and only once, after both
+the persisted report id and animation completion exist. Effect ownership checks
+prevent stale timers or async completions from updating or navigating a newer run.
+Retry creates a fresh nonce and therefore a fresh logical request.
+
 ## Deterministic-first principle
 
 Within a *single* generation, the deterministic agents produce a complete, grounded

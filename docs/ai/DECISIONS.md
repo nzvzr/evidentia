@@ -614,3 +614,46 @@ does not duplicate onto every section — so the provider (which holds the
 document row) supplies it at projection time. Every other currency field is a
 strict field-for-field projection, pinned by test against the demo reader's
 actual output shape.
+
+## 2026-07-15 — `/running` lifecycle and Strict Mode request ownership
+
+**Successful report navigation is a dedicated effect.** Request completion stores
+only the persisted report id; the presentational animation stores its own completion
+state. Navigation occurs once after both exist, with its guard set before
+`router.push`. Functional state updaters remain pure and contain no navigation,
+timers, networking, or cross-state writes.
+
+**One workspace click carries a session-scoped run nonce.** React Strict Mode
+replays effects as setup → cleanup → setup, which previously started two POSTs and
+let the cleanup-aborted subscription surface a false unavailable state. A
+module-scoped registry now shares only the live request keyed by nonce + exact
+input. Its zero-delay idle abort lets the synchronous replay re-subscribe, while a
+real unmount still cancels. Settled entries are removed immediately; retry writes a
+fresh nonce. The pending input/nonce remains session-scoped and is purged on session
+change; authenticated report content is never stored in browser storage.
+
+**Every callback proves active-run ownership.** Stale request results, slow timers,
+and cleanup cancellations cannot update or navigate a newer run. The backend's
+generation and persistence behavior, authenticated no-fallback rule, and public
+`EvidentiaReport` schema are unchanged.
+
+**A 200 must carry a persisted report id.** `/running` can only complete by
+navigating to `/reports/{id}`, so a 200 whose body is unparseable, not an object,
+or lacks a non-empty string `id` is a malformed success: it maps to the generic
+failure state rather than success (never to unavailable, which promises "nothing
+was generated"). Only this minimum persistence/navigation contract is validated
+client-side; a full `EvidentiaReport` runtime validator is deliberately out of
+scope.
+
+**Rendered header labels wait for mount.** `/running` is statically prerendered,
+so its server HTML always shows the default persona/market. The stored selection
+is rendered only after mount to keep hydration consistent; the run input itself
+is still read from storage during the first client render, so the generation
+effect POSTs the real selection immediately and the label re-render starts no
+second request.
+
+**Client single-flight scope (recorded limit).** The nonce-keyed registry
+guarantees one request per logical run within one tab/mount lifecycle. It does
+**not** deduplicate across browser tabs, after navigating back to `/running`, or
+against server-side replay. True end-to-end idempotency (e.g. a backend-honored
+`Idempotency-Key`) belongs to a later backend/API milestone.

@@ -9,6 +9,39 @@ Deterministic-first pipeline; optional LLM refinement layered on top.
 **Authenticated and multi-tenant**: every resource belongs to an organization,
 and every query is tenant-scoped.
 
+## Pre-M2 frontend generation stabilization (2026-07-15)
+
+- Fixed the confirmed `/running` render-phase update: stage state updates are
+  pure, and successful navigation now occurs once in a dedicated effect after
+  both the persisted report id and the seven-stage animation are complete.
+- Confirmed React Strict Mode previously started two generation fetches. A
+  session-scoped run nonce and live-request-only single-flight registry now share
+  one POST across setup/cleanup/setup replay, abort on a real unmount, delete
+  settled entries immediately, and give retry a fresh logical attempt.
+- Active-run ownership prevents stale success, failure, slow timer, or cleanup
+  aborts from changing the current run. 401/429/503/timeout/network/other-error
+  semantics remain explicit; authenticated report content is never put in
+  `localStorage`.
+- Independent review approved the diff with two non-blocking corrections, both
+  applied: (1) `/running` header labels render the prerendered defaults until
+  hydration completes (`useSyncExternalStore` hydration gate), so a hard refresh
+  with a non-default stored persona/market produces no hydration mismatch while
+  the generation effect still POSTs the stored input immediately; (2) a 200
+  response whose body is unparseable, not an object, or lacks a non-empty string
+  `report.id` now maps to the generic failure state (`Generation failed`) instead
+  of waiting in finalizing forever.
+- Regression coverage: 22 behavioral React tests under Strict Mode (six
+  malformed-200 cases and two hydration-label tests added). Full frontend
+  verification is recorded in `SESSION_HANDOFF.md`.
+- Authenticated Chrome smoke, including a Next dev restart: each click observed
+  exactly **1 POST /api/generate-workflow**, HTTP 200, exactly **1** new persisted
+  report, one UUID redirect, zero Next error overlays, and report refresh success.
+  Backend-down smoke observed one POST/503, honest `Generation unavailable`, and
+  no report navigation; backend was restored afterward.
+- No backend generation/persistence code and no M2 functionality changed. M2
+  remains blocked until this uncommitted diff is independently reviewed, committed,
+  and pushed.
+
 ## Platform architecture consolidated (2026-07-14, design only — no code changed)
 
 The long-term architecture is closed and recorded in
@@ -392,8 +425,9 @@ High findings were reproduced with failing tests first, then fixed.
   `/documents`, `/playbook/[id]/print`. Reads reports **only from the backend** —
   there is no `localStorage` fallback for authenticated data, and a backend 404
   never falls back to a local report.
-  The `/running` loader shows honest pipeline stages (no fake %), gates completion
-  on the real result, and has timeout/slow/unavailable/error states. The report UI and
+  The `/running` loader shows honest pipeline stages (no fake %), gates one-time
+  navigation on the real persisted id plus animation completion, deduplicates
+  Strict Mode effect replay, and has timeout/slow/unavailable/error states. The report UI and
   print playbook render insufficient-evidence (`N/A`) items as a distinct
   "INSUFFICIENT EVIDENCE" marker, use a 3-colour severity scale, and handle empty
   risk/workflow/citation states. The PDF flows long sections across pages
