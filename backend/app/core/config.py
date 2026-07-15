@@ -328,6 +328,14 @@ class Settings(BaseSettings):
     database_url: str = ""
     evidentia_db_enabled: bool = True
 
+    # --- tenant document corpus (ingestion plan, M1+) ---
+    # Master switch for the customer-document ingestion feature. OFF (the
+    # default) means today's behavior byte-for-byte: generation reads only the
+    # bundled demo corpus, and the M1 schema/seams are inert. All ingestion
+    # schema migrations land before this flag ever turns on; turning it off is
+    # the whole rollback (reports are snapshots — nothing to migrate back).
+    evidentia_tenant_corpus_enabled: bool = False
+
     # --- auth ---
     # Signing key for access tokens. MUST be set in production; startup fails if
     # it is left at the dev default while evidentia_env == "production".

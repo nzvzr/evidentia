@@ -585,3 +585,32 @@ section text; a graph edge is never itself evidence.
 
 Public report schema unchanged. No application code was changed by this
 consolidation — documents only.
+
+## 2026-07-15 — M1 implementation decisions (schema + seams + typed contracts)
+
+M1 implemented per the `PLATFORM_ARCHITECTURE.md` §12 gate. Three
+implementation-level decisions made where the design left latitude:
+
+**`documents.current_version_id` carries no DB-level foreign key.** A real FK
+would make `documents` and `document_versions` reference each other circularly;
+SQLite (the dev database, where the test schema is created via
+`Base.metadata.create_all`) cannot add the second constraint of a circular
+pair. Integrity is application-enforced at the single atomic flip site (only
+ever to a `ready` version) — the same posture as `company.owner_id`
+re-derivation. Recorded in the migration docstring
+(`f7c3a1b9e2d4_document_ingestion_schema.py`).
+
+**The M1 backfill creates `pending` versions, not `ready` ones.** The
+sectionizer does not exist until M2, and a version must never be visible to
+generation before its sections are complete. `scripts/backfill_documents.py`
+therefore synthesizes version 1 + blob + a `queued` ingestion job per
+`content_text` document and leaves `current_version_id` NULL; the M2 worker
+takes it from there. Idempotent (any-version ⇒ skip); one document per commit.
+
+**`SectionRecord.to_pipeline_section(source_title)` takes the document title
+as a parameter.** The pipeline currency's `source` field is the owning
+document's display title — document-level state the §5 field list deliberately
+does not duplicate onto every section — so the provider (which holds the
+document row) supplies it at projection time. Every other currency field is a
+strict field-for-field projection, pinned by test against the demo reader's
+actual output shape.

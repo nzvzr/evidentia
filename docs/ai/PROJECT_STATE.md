@@ -1,6 +1,6 @@
 # Evidentia — Project State
 
-_Concise snapshot. Update after meaningful changes. Last updated: 2026-07-14._
+_Concise snapshot. Update after meaningful changes. Last updated: 2026-07-15._
 
 ## Summary
 
@@ -41,7 +41,72 @@ approval. Key outcomes:
   tenant automatically. Knowledge graph explicitly deferred.
 - Milestone entry gates (M1/M3/M4/M5) are defined in
   `PLATFORM_ARCHITECTURE.md` §12. Eleven decisions appended to `DECISIONS.md`.
-  **M1 implementation has not started.**
+  **M1 is implemented (2026-07-15, see below); M2+ have not started.**
+
+## M1 implemented — schema + seams + typed contracts (verified 2026-07-15)
+
+Everything in the §12 M1 gate, additive only, zero behavior change (the flag
+is off by default and nothing reads the new tables yet):
+
+- **Typed contracts** (`backend/app/contracts.py`): `RawDocument v1`,
+  `DocIR v1`, `SectionRecord v1`, `ClaimSpec v1` fully typed (frozen
+  dataclasses, closed vocabularies validated, `contract_version` markers);
+  `EvidenceBinding v1` and stubs for `ClaimCandidate`/`Finding`/
+  `Recommendation`/`CanonicalAnalysisDocument v1`.
+  `SectionRecord.to_pipeline_section(source_title)` is the strict projection
+  to the pipeline currency dict, test-pinned against `document_reader`'s
+  actual output key set (`source` = document title, supplied by the provider —
+  see `DECISIONS.md` 2026-07-15).
+- **Protocol seams**: `BlobStore` (`services/blob_store.py`) with a DB-backed
+  `DatabaseBlobStore` (bytes in `document_blobs.data`, `storage_key`
+  `db:<id>`, tenant-scoped reads); `JobQueue` (`services/job_queue.py`) with
+  `DatabaseJobQueue.enqueue` (idempotent per live version; claim/worker is
+  M2); `SectionProvider` (`agents/section_provider.py`) with
+  `DemoCorpusProvider` verified byte-identical to `document_reader`. The
+  orchestrator is NOT yet injected — that is M4.
+- **Additive migration** `f7c3a1b9e2d4` (revises `d3a91c65e820`):
+  `document_versions` (immutable revisions, status state machine,
+  `anchor_algo_version`/parser provenance columns), `document_blobs` (1–1 per
+  version), `document_sections` (SectionRecord persisted; unique
+  `(version_id, anchor_id)` + `(version_id, ordinal)`; classifier provenance
+  columns), `ingestion_jobs` (state/attempts/heartbeat +
+  `(state, heartbeat_at)` index), and 11 new `documents` columns
+  (`source_type`, `origin_uri`, `original_filename`, `mime_type`,
+  `content_sha256`, `size_bytes`, `citation_prefix`, `current_version_id` —
+  no DB FK, application-enforced flip, see `DECISIONS.md` — `status`,
+  `deleted_at`, `created_by`). Verified: upgrade from empty → head, downgrade,
+  re-upgrade on SQLite; migrated schema column-identical to
+  `Base.metadata.create_all`. `content_text` is now formally deprecated
+  (debt-watch removal milestone still pending).
+- **Crash-safe blob/row write order + orphaned-blob reconciliation** are
+  documented as a binding contract in the migration docstring and the
+  `BlobStore` module docstring: version row (`pending`) → blob put → work;
+  periodic sweep deletes blobs unreferenced past a grace window.
+- **Feature flag** `EVIDENTIA_TENANT_CORPUS_ENABLED` (settings +
+  `.env.example`), default **off** = today's behavior byte-for-byte; a test
+  pins the default.
+- **Backfill** (`scripts/backfill_documents.py` →
+  `services/document_backfill.py`): synthesizes version 1 (`pending`) + blob +
+  queued job per `content_text` document; idempotent (re-run skips
+  already-versioned docs); one document per commit; `--company-id` and
+  `--dry-run`. Verified end-to-end via the CLI against a migrated scratch DB.
+- **Tests**: +38 (`tests/test_contracts.py` 13,
+  `tests/test_ingestion_schema_and_seams.py` 24, one PostgreSQL enqueue-race
+  test in `tests/test_concurrency.py`), including a byte-for-byte guard that
+  the documents API response gains no new keys. Full backend suite:
+  **311 passed, 3 skipped** (PostgreSQL-only). Frontend untouched.
+- **Independent-review corrections applied (2026-07-15, verified)**: the
+  application SQLite engine now enables `PRAGMA foreign_keys=ON`
+  (`create_application_engine`; document deletes cascade, orphan repro fixed);
+  partial unique index `uq_ingestion_jobs_live_version` (one queued/running
+  job per version, DB-enforced; enqueue resolves the losing racer via
+  SAVEPOINT + re-select, race verified on PostgreSQL 16); unique
+  `uq_documents_company_citation_prefix` on `(company_id, citation_prefix)`
+  (nullable, NULLs distinct); redundant single-column indexes removed
+  (`ix_document_sections_company_id`, `ix_document_versions_document_id` —
+  both covered by leftmost prefixes of composite indexes/constraints).
+  Migration + ORM stay drift-free (checked on SQLite; migration also cycled on
+  PostgreSQL 16).
 
 ## Authentication & multi-tenancy (verified 2026-07-13)
 
@@ -538,10 +603,20 @@ container/health/config work, which still stands.
 
 ## Tests
 
-- **274 passing** backend tests (+2 skipped on SQLite: the PostgreSQL-only tests)
+- **311 passing** backend tests (+3 skipped on SQLite: the PostgreSQL-only tests)
   + **6 vitest** (demo limiter): `python -m pytest -q` (from `backend/`) and
   `npm test`. The concurrency file verified against real PostgreSQL 16.14 across
   **15 consecutive runs** (all 15 tests, 0 failures).
+  - **37 M1 tests** (`test_contracts.py` 13, `test_ingestion_schema_and_seams.py`
+    24): SectionRecord→currency projection pinned against the demo reader's
+    real output; closed contract vocabularies; schema uniqueness constraints
+    (incl. tenant-scoped `citation_prefix` and the live-job partial unique
+    index); FK cascade through the real application engine (SQLite pragma);
+    blob 1–1 per version; BlobStore roundtrip + tenant-scoped reads; JobQueue
+    enqueue idempotency + terminal-state re-enqueue + lost-race survivor
+    adoption preserving the outer transaction; DemoCorpusProvider ≡
+    document_reader; documents API key-set unchanged; corpus flag default off;
+    backfill correctness/idempotency/company-filter/dry-run.
   - **13 concurrency tests** (`test_concurrency.py`) — each worker thread gets its
     own Session; worker exceptions are collected and asserted empty; `pytest.ini`
     promotes `PytestUnhandledThreadExceptionWarning` to an **error**. Covers: a login
@@ -554,8 +629,11 @@ container/health/config work, which still stands.
     *after* the lock was released, so overlapping-but-unserialized threads cannot fake
     a pass); concurrent ownership transfer vs demotion leaving `company.owner_id` on a
     real owner; and the identity-map staleness that caused H2, isolated from any race.
-    Two further tests exercise real PostgreSQL row locks and **skip loudly** unless
-    `EVIDENTIA_TEST_DATABASE_URL` is set.
+    Three further tests exercise real PostgreSQL behaviour and **skip loudly** unless
+    `EVIDENTIA_TEST_DATABASE_URL` is set: two for row locks, and one proving two
+    sessions concurrently enqueueing the same document version leave exactly one
+    live ingestion job (the loser adopts the survivor via the partial unique
+    index + savepoint recovery).
   - **33 rate-limit / hardening tests** (`test_rate_limit.py`): fixed-window
     correctness + expiry + Retry-After, independent budgets, `check_all` counting
     every rule (so tripping the IP budget cannot dodge the account budget); login

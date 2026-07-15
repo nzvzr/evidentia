@@ -39,9 +39,22 @@ from typing import Callable, List
 
 import pytest
 
+from sqlalchemy import select
+
 from app.core import security
-from app.models.db_models import Company, CompanyMember, RefreshToken, User
+from app.models.db_models import (
+    JOB_STATE_QUEUED,
+    JOB_STATE_RUNNING,
+    Company,
+    CompanyMember,
+    Document,
+    DocumentVersion,
+    IngestionJob,
+    RefreshToken,
+    User,
+)
 from app.repositories import memberships as memberships_repo
+from app.services.job_queue import DatabaseJobQueue
 from tests.conftest import VALID_PASSWORD, register
 
 NEW_PASSWORD = "an-entirely-different-password"
@@ -792,3 +805,71 @@ def test_user_row_lock_serializes_session_issuance_on_postgres(client, session_f
     errors = run_concurrently([do_refresh, do_logout_all])
     assert errors == [], f"worker raised: {errors}"
     assert _live_refresh_tokens(session_factory, acct.email) == 0
+
+
+@requires_postgres
+def test_concurrent_enqueue_leaves_exactly_one_live_job_on_postgres(session_factory):
+    """The enqueue race the partial unique index exists for, on the engine
+    production actually uses.
+
+    Two sessions both pass the 'no live job' pre-select, both INSERT. On
+    PostgreSQL the second INSERT blocks on the unique index entry until the
+    first commits, then raises; the loser's savepoint rollback must discard
+    only its insert, and the loser must re-select and adopt the winner's job.
+    SQLite cannot demonstrate this faithfully (a writer holding a stale
+    snapshot fails with SQLITE_BUSY, not a unique violation), so the
+    deterministic simulation lives in test_ingestion_schema_and_seams.py and
+    the genuine race is proven here.
+    """
+    setup = session_factory()
+    try:
+        company = Company(name="Enqueue Race Co", slug="enqueue-race-co")
+        setup.add(company)
+        setup.flush()
+        doc = Document(company_id=company.id, title="Racy", slug="racy")
+        setup.add(doc)
+        setup.flush()
+        version = DocumentVersion(document_id=doc.id, company_id=company.id, version_no=1)
+        setup.add(version)
+        setup.commit()
+        company_id, document_id, version_id = company.id, doc.id, version.id
+    finally:
+        setup.close()
+
+    resolved_ids: List[str] = []
+    resolved_lock = threading.Lock()
+
+    def enqueue_worker() -> None:
+        session = session_factory()
+        try:
+            job = DatabaseJobQueue().enqueue(
+                session, company_id=company_id, document_id=document_id, version_id=version_id
+            )
+            session.commit()
+            with resolved_lock:
+                resolved_ids.append(job.id)
+        finally:
+            session.close()
+
+    errors = run_concurrently([enqueue_worker, enqueue_worker])
+    assert errors == [], f"worker raised: {errors}"
+
+    # Both callers resolved, and to the SAME surviving job.
+    assert len(resolved_ids) == 2
+    assert len(set(resolved_ids)) == 1
+
+    check = session_factory()
+    try:
+        live = (
+            check.execute(
+                select(IngestionJob).where(
+                    IngestionJob.version_id == version_id,
+                    IngestionJob.state.in_((JOB_STATE_QUEUED, JOB_STATE_RUNNING)),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [job.id for job in live] == [resolved_ids[0]]
+    finally:
+        check.close()
