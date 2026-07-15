@@ -18,8 +18,21 @@ def list_documents(db: Session, company_id: str) -> List[Document]:
     )
 
 
-def get_document(db: Session, document_id: str) -> Optional[Document]:
-    return db.get(Document, document_id)
+def get_document(db: Session, document_id: str, company_id: str) -> Optional[Document]:
+    """Tenant-scoped lookup. `company_id` is mandatory: a document belonging to
+    another tenant is indistinguishable from one that does not exist."""
+    return db.execute(
+        select(Document).where(Document.id == document_id, Document.company_id == company_id)
+    ).scalar_one_or_none()
+
+
+def delete_document(db: Session, document_id: str, company_id: str) -> bool:
+    row = get_document(db, document_id, company_id)
+    if not row:
+        return False
+    db.delete(row)
+    db.flush()
+    return True
 
 
 def create_document(

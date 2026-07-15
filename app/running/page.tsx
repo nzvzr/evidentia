@@ -4,11 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { AGENTS } from "@/lib/demoReport";
-import { runEvidentiaAgents } from "@/lib/agents/orchestrator";
 import { readPendingRun } from "@/lib/pendingRun";
 import { buildAgentInput } from "@/lib/workspaceMapping";
 import { readSelection } from "@/lib/useWorkspace";
-import { saveReport } from "@/lib/reportsStore";
 import type { AgentInput, EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
@@ -17,10 +15,17 @@ const mono = "var(--font-plex-mono), monospace";
 // progress); completion is gated on the *actual* report, never on the timer.
 const STAGE_MS = 780;
 const SLOW_AFTER_MS = 22000; // surface a "taking longer" notice
-const HARD_TIMEOUT_MS = 60000; // guarantee a result via the local pipeline
-const FETCH_ABORT_MS = 45000; // stop waiting on the network, fall back locally
+const FETCH_ABORT_MS = 60000; // stop waiting on the network
 
-type Phase = "running" | "finalizing" | "slow" | "fallback" | "error";
+/**
+ * There is deliberately no local-pipeline fallback here any more.
+ *
+ * This report belongs to the signed-in account and is persisted to their tenant.
+ * Generating it locally when the backend is unreachable would produce an
+ * authenticated-looking report for a session nobody validated. If the server
+ * cannot generate it, we say so and offer a retry.
+ */
+type Phase = "running" | "finalizing" | "slow" | "unavailable" | "limited" | "expired" | "error";
 
 export default function RunningPage() {
   const router = useRouter();
@@ -38,18 +43,18 @@ export default function RunningPage() {
     let report: EvidentiaReport | null = null;
     let stagesDone = false;
     let navigated = false;
-    let usedFallback = false;
 
     const timers: Array<ReturnType<typeof setTimeout>> = [];
     let stageTimer: ReturnType<typeof setInterval> | null = null;
 
-    const localFallback = (): EvidentiaReport => {
-      usedFallback = true;
-      return runEvidentiaAgents(input, { generatedAt: new Date().toISOString() });
-    };
-
     const markReady = () => {
       if (report) setReportReady(true);
+    };
+
+    const fail = (next: Phase) => {
+      if (stageTimer) clearInterval(stageTimer);
+      timers.forEach(clearTimeout);
+      setPhase(next);
     };
 
     const finish = () => {
@@ -57,15 +62,15 @@ export default function RunningPage() {
       navigated = true;
       if (stageTimer) clearInterval(stageTimer);
       timers.forEach(clearTimeout);
-      try {
-        saveReport(report);
-      } catch {
-        /* ignore quota errors */
-      }
+      // The report is already persisted to the tenant by the backend. It is
+      // deliberately NOT mirrored into localStorage: that global key survived
+      // logout and leaked one account's report content to the next user.
       router.push(`/reports/${report.id}`);
     };
 
-    // 1) generate: backend/API first, deterministic local pipeline as fallback.
+    // Generate server-side. The server is the only thing that can validate the
+    // session and persist to the tenant, so a failure here is a real failure —
+    // it is never papered over with a locally generated report.
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), FETCH_ABORT_MS);
     timers.push(abortTimer);
@@ -78,22 +83,40 @@ export default function RunningPage() {
           body: JSON.stringify(input),
           signal: controller.signal,
         });
-        if (!res.ok) throw new Error(`status ${res.status}`);
-        report = (await res.json()) as EvidentiaReport;
-      } catch {
-        try {
-          report = localFallback();
-        } catch {
-          setPhase("error");
+
+        if (res.status === 401) {
+          // Session expired or revoked — send them back through login.
+          router.push("/login?next=/workspace");
           return;
         }
+        if (res.status === 429) {
+          fail("limited");
+          return;
+        }
+        if (res.status === 503) {
+          fail("unavailable");
+          return;
+        }
+        if (!res.ok) {
+          fail("error");
+          return;
+        }
+
+        report = (await res.json()) as EvidentiaReport;
+      } catch {
+        // Network failure or timeout: honestly unavailable, not silently faked.
+        fail("unavailable");
+        return;
       } finally {
         clearTimeout(abortTimer);
       }
+
       markReady();
-      if (usedFallback && !navigated) setPhase((p) => (p === "error" ? p : "fallback"));
       finish();
     })();
+
+    const isTerminal = (p: Phase) =>
+      p === "error" || p === "unavailable" || p === "limited" || p === "expired";
 
     // 2) advance the visible pipeline stages (holds on the final stage).
     stageTimer = setInterval(() => {
@@ -102,7 +125,7 @@ export default function RunningPage() {
         if (next >= total - 1) {
           if (stageTimer) clearInterval(stageTimer);
           stagesDone = true;
-          setPhase((p) => (p === "error" ? p : report ? "running" : "finalizing"));
+          setPhase((p) => (isTerminal(p) ? p : report ? "running" : "finalizing"));
           finish();
           return total - 1;
         }
@@ -110,26 +133,12 @@ export default function RunningPage() {
       });
     }, STAGE_MS);
 
-    // 3) honest long-running + hard-timeout handling.
+    // 3) honest long-running notice. There is no hard-timeout fallback: if the
+    //    request never completes, the abort above surfaces "unavailable".
     timers.push(
       setTimeout(() => {
-        if (!report && !navigated) setPhase((p) => (p === "error" ? p : "slow"));
+        if (!report && !navigated) setPhase((p) => (isTerminal(p) ? p : "slow"));
       }, SLOW_AFTER_MS),
-    );
-    timers.push(
-      setTimeout(() => {
-        if (!report && !navigated) {
-          try {
-            report = localFallback();
-            markReady();
-            setPhase("fallback");
-            stagesDone = true;
-            finish();
-          } catch {
-            setPhase("error");
-          }
-        }
-      }, HARD_TIMEOUT_MS),
     );
 
     return () => {
@@ -142,27 +151,39 @@ export default function RunningPage() {
   const total = AGENTS.length;
   const lastStage = stageIdx >= total - 1;
 
-  const statusText =
-    phase === "error" ? "● FAILED" : phase === "slow" ? "● STILL WORKING" : "● RUNNING";
-  const statusColor = phase === "error" ? "#c34635" : "var(--accent)";
+  const failed =
+    phase === "error" || phase === "unavailable" || phase === "limited" || phase === "expired";
+
+  const statusText = failed
+    ? phase === "limited"
+      ? "● RATE LIMITED"
+      : "● FAILED"
+    : phase === "slow"
+      ? "● STILL WORKING"
+      : "● RUNNING";
+  const statusColor = failed ? "#c34635" : "var(--accent)";
 
   const headline =
-    phase === "error"
-      ? "Generation failed"
-      : phase === "fallback"
-        ? "Finalizing offline report"
-        : "Composing your report";
+    phase === "unavailable"
+      ? "Generation unavailable"
+      : phase === "limited"
+        ? "Generation limit reached"
+        : phase === "error"
+          ? "Generation failed"
+          : "Composing your report";
 
   const subline =
-    phase === "error"
-      ? "The report could not be generated. Please try again."
-      : phase === "slow"
-        ? "This is taking longer than usual — still analyzing the corpus. We'll finalize with the deterministic pipeline if needed."
-        : phase === "fallback"
-          ? "The AI backend was unavailable, so Evidentia is using its deterministic pipeline. The report is still fully grounded and cited."
-          : phase === "finalizing"
-            ? "Agents complete — compiling the grounded playbook…"
-            : `Stage ${Math.min(stageIdx + 1, total)} of ${total} · ${AGENTS[Math.min(stageIdx, total - 1)].name}`;
+    phase === "unavailable"
+      ? "The report service could not be reached, so we haven't generated anything. Your documents and reports are untouched — please try again in a moment."
+      : phase === "limited"
+        ? "You've reached the report generation limit for now. Please try again later."
+        : phase === "error"
+          ? "The report could not be generated. Please try again."
+          : phase === "slow"
+            ? "This is taking longer than usual — still analyzing the corpus."
+            : phase === "finalizing"
+              ? "Agents complete — compiling the grounded playbook…"
+              : `Stage ${Math.min(stageIdx + 1, total)} of ${total} · ${AGENTS[Math.min(stageIdx, total - 1)].name}`;
 
   return (
     <AppShell active="workspace" theme="dark" background="#0a0a0b">
@@ -206,10 +227,14 @@ export default function RunningPage() {
               })}
             </div>
 
-            {phase === "error" ? (
+            {failed ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "flex-start" }}>
                 <div style={{ fontSize: 13.5, color: "rgba(245,245,243,.7)", lineHeight: 1.6 }}>
-                  Something went wrong while generating this report.
+                  {phase === "unavailable"
+                    ? "Nothing was generated and nothing was saved. This is a temporary server problem, not a problem with your documents."
+                    : phase === "limited"
+                      ? "You've generated a lot of reports recently. The limit resets automatically."
+                      : "Something went wrong while generating this report."}
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
                   <button onClick={() => window.location.reload()} style={btnPrimary}>Try again</button>

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Logo from "./Logo";
+import { useSession } from "./SessionProvider";
 
 export type SidebarKey = "workspace" | "reports" | "playbooks" | "documents";
 
@@ -228,7 +229,6 @@ export default function AppSidebar({
         {[
           { label: "Settings", letter: "S", onClick: onSettings },
           { label: "Help", letter: "?", onClick: undefined },
-          { label: "Account", letter: "A", onClick: undefined },
         ].map((b) => (
           <button
             key={b.label}
@@ -269,8 +269,99 @@ export default function AppSidebar({
             </span>
           </button>
         ))}
+
+        <AccountCard pal={pal} />
       </div>
     </aside>
+  );
+}
+
+/** The signed-in user, their organization + role, and sign out. */
+function AccountCard({ pal }: { pal: Palette }) {
+  const router = useRouter();
+  const { user, activeCompany, signOut } = useSession();
+
+  if (!user) return null;
+
+  const initial = (user.name || user.email).charAt(0).toUpperCase();
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.push("/login");
+    router.refresh();
+  };
+
+  return (
+    <div style={{ marginTop: 8, paddingTop: 10, borderTop: `1px solid ${pal.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "6px 10px" }}>
+        <span
+          style={{
+            width: 22,
+            height: 22,
+            flex: "none",
+            borderRadius: 6,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "var(--font-plex-mono), monospace",
+            fontSize: 10.5,
+            fontWeight: 600,
+            background: pal.tile,
+            color: pal.text,
+          }}
+        >
+          {initial}
+        </span>
+        <span style={{ minWidth: 0 }}>
+          <span
+            style={{
+              display: "block",
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: pal.text,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {user.name || user.email}
+          </span>
+          {activeCompany && (
+            <span
+              style={{
+                display: "block",
+                fontSize: 11,
+                color: pal.sub,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {activeCompany.name} · {activeCompany.role}
+            </span>
+          )}
+        </span>
+      </div>
+      <button
+        onClick={handleSignOut}
+        style={{
+          display: "block",
+          width: "100%",
+          padding: "7px 10px",
+          marginTop: 2,
+          borderRadius: 8,
+          cursor: "pointer",
+          background: "transparent",
+          border: "none",
+          font: "inherit",
+          fontSize: 12.5,
+          color: pal.sub,
+          textAlign: "left",
+        }}
+      >
+        Sign out
+      </button>
+    </div>
   );
 }
 

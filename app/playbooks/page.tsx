@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { PLAYBOOK_TEMPLATES } from "@/lib/scenarios";
 import { DEMO_REPORTS } from "@/data/demoReports";
-import { getReports } from "@/lib/reportsStore";
+import { fetchBackendReports } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
@@ -48,8 +48,18 @@ export default function PlaybooksPage() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setStored(getReports());
-    setHydrated(true);
+    // Tenant reports come from the backend only — never from a browser cache.
+    let cancelled = false;
+    fetchBackendReports()
+      .then((reports) => {
+        if (!cancelled) setStored(reports);
+      })
+      .finally(() => {
+        if (!cancelled) setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const openReport = (rec: PlaybookCard) => router.push(`/reports/${rec.id}`);
@@ -92,8 +102,8 @@ export default function PlaybooksPage() {
           </span>
           <span style={{ fontSize: 13, color: "var(--ink2)" }}>
             {hasLocal
-              ? "Generated reports are stored locally for this session."
-              : "Showing demo playbooks — run a workspace to generate your own. Generated reports are stored locally for this session."}
+              ? "Your generated reports are stored in your organization's workspace."
+              : "Showing sample playbooks — run a workspace to generate your own."}
           </span>
         </div>
 

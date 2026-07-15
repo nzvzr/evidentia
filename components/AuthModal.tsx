@@ -2,25 +2,29 @@
 
 import { useEffect, useState } from "react";
 import Logo from "./Logo";
+import { useSession } from "./SessionProvider";
 import SignInForm from "./SignInForm";
 import SignUpForm from "./SignUpForm";
-import { useMockAuth } from "@/lib/useMockAuth";
 
 interface AuthModalProps {
   open: boolean;
   onClose: () => void;
-  /** called after a successful mock sign in / sign up */
+  /** called after a successful sign in / sign up */
   onSuccess?: () => void;
   initialMode?: "signin" | "signup";
 }
 
+/**
+ * Real authentication. `signIn`/`signUp` hit the server and throw on failure;
+ * the forms surface the error and the modal only closes on success.
+ */
 export default function AuthModal({
   open,
   onClose,
   onSuccess,
   initialMode = "signin",
 }: AuthModalProps) {
-  const { signIn, signUp } = useMockAuth();
+  const { signIn, signUp } = useSession();
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
 
   useEffect(() => {
@@ -48,16 +52,16 @@ export default function AuthModal({
         </div>
         {mode === "signin" ? (
           <SignInForm
-            onSubmit={(email, password) => {
-              signIn(email, password);
+            onSubmit={async (email, password) => {
+              await signIn(email, password);
               finish();
             }}
             onSwitch={() => setMode("signup")}
           />
         ) : (
           <SignUpForm
-            onSubmit={(name, email, company, password) => {
-              signUp(name, email, company, password);
+            onSubmit={async (input) => {
+              await signUp(input);
               finish();
             }}
             onSwitch={() => setMode("signin")}

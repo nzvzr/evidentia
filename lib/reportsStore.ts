@@ -1,72 +1,48 @@
 "use client";
 
+import { PUBLIC_DEMO_PREFIX } from "./sessionCache";
 import type { EvidentiaReport } from "./types";
 
-const STORAGE_KEY = "evidentia:reports";
-const MAX_REPORTS = 30;
+/**
+ * Storage for the **public demo** report only.
+ *
+ * This module used to cache every authenticated report under a global
+ * `evidentia:reports` key that survived logout. It no longer touches
+ * authenticated data at all: a signed-in user's reports live in the backend and
+ * are fetched per request (lib/reportsApi.ts).
+ *
+ * The single key here holds the anonymous sample report produced by
+ * `/api/demo/generate-workflow`, so the public demo can navigate from the run
+ * page to the report page without a backend. It contains no customer data.
+ */
 
-function read(): EvidentiaReport[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as EvidentiaReport[]) : [];
-  } catch {
-    return [];
-  }
-}
+const DEMO_REPORT_KEY = `${PUBLIC_DEMO_PREFIX}report`;
 
-function write(reports: EvidentiaReport[]): void {
+/** Persist the public demo report. Never call this with an authenticated report. */
+export function saveDemoReport(report: EvidentiaReport): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(reports.slice(0, MAX_REPORTS)));
+    window.localStorage.setItem(DEMO_REPORT_KEY, JSON.stringify(report));
   } catch {
     /* ignore quota / serialization errors */
   }
 }
 
-/** Persist a report (newest first, de-duplicated by id). */
-export function saveReport(report: EvidentiaReport): void {
-  const existing = read().filter((r) => r.id !== report.id);
-  write([report, ...existing]);
+export function getDemoReport(): EvidentiaReport | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(DEMO_REPORT_KEY);
+    return raw ? (JSON.parse(raw) as EvidentiaReport) : null;
+  } catch {
+    return null;
+  }
 }
 
-export function getReport(id: string): EvidentiaReport | null {
-  return read().find((r) => r.id === id) ?? null;
-}
-
-export function getReports(): EvidentiaReport[] {
-  return read();
-}
-
-export function getLastReport(): EvidentiaReport | null {
-  const all = read();
-  return all.length > 0 ? all[0] : null;
-}
-
-export function clearReports(): void {
+export function clearDemoReport(): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(DEMO_REPORT_KEY);
   } catch {
     /* ignore */
   }
-}
-
-/**
- * Resolve a report by id for the detail / print pages.
- * Order: localStorage → demo scenario/default. This is safe to call after mount.
- */
-export function resolveStoredReport(
-  id: string,
-  fallback: (id: string) => EvidentiaReport,
-): EvidentiaReport {
-  const stored = getReport(id);
-  if (stored) return stored;
-  if (id === "current") {
-    const last = getLastReport();
-    if (last) return last;
-  }
-  return fallback(id);
 }

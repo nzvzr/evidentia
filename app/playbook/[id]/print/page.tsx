@@ -4,7 +4,6 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Logo from "@/components/Logo";
 import { generateReportForId } from "@/data/demoReports";
-import { resolveStoredReport } from "@/lib/reportsStore";
 import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport, RiskItem } from "@/lib/types";
 
@@ -48,14 +47,17 @@ export default function PrintPlaybookPage() {
   const params = useParams<{ id: string }>();
   const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
 
-  const [report, setReport] = useState<EvidentiaReport>(() => generateReportForId(id));
+  const [report, setReport] = useState<EvidentiaReport | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const backendReport = await fetchBackendReport(id);
       if (cancelled) return;
-      setReport(backendReport ?? resolveStoredReport(id, generateReportForId));
+      // Backend only. Never fall back to a cached/generated report: printing a
+      // fabricated or another tenant's report as an official playbook is worse
+      // than printing nothing.
+      setReport(backendReport);
     })();
     try {
       window.scrollTo(0, 0);
@@ -66,6 +68,20 @@ export default function PrintPlaybookPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // Backend-only: until the report is loaded (or if it does not exist for this
+  // tenant) there is nothing legitimate to print.
+  if (!report) {
+    return (
+      <div style={{ padding: 48, fontFamily: "var(--font-archivo), sans-serif" }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Report unavailable</h1>
+        <p style={{ fontSize: 13.5, color: "#666", marginTop: 8 }}>
+          This playbook could not be loaded. It may not exist, or it may belong to a different
+          organization.
+        </p>
+      </div>
+    );
+  }
 
   const { metrics } = report;
   const mode = report.generationMode ?? "deterministic";

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { DEMO_REPORTS } from "@/data/demoReports";
 import { REPORT_CATEGORIES } from "@/lib/scenarios";
-import { getReports } from "@/lib/reportsStore";
 import { fetchBackendReports } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
 
@@ -51,14 +50,13 @@ function toCard(r: EvidentiaReport, isLocal: boolean): Card {
 
 export default function ReportsPage() {
   const router = useRouter();
-  const [stored, setStored] = useState<EvidentiaReport[]>([]);
   const [backendReports, setBackendReports] = useState<EvidentiaReport[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("All");
 
   useEffect(() => {
-    setStored(getReports());
-    // Backend (DB) reports first; localStorage remains a fallback.
+    // The backend is the ONLY source of truth for a signed-in user's reports.
+    // They are never mirrored into localStorage, so there is nothing to merge.
     let cancelled = false;
     fetchBackendReports().then((reports) => {
       if (!cancelled) setBackendReports(reports);
@@ -76,18 +74,13 @@ export default function ReportsPage() {
       seen.add(r.id);
       out.push(toCard(r, true));
     }
-    for (const r of stored) {
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      out.push(toCard(r, true));
-    }
     for (const r of DEMO_REPORTS) {
       if (seen.has(r.id)) continue;
       seen.add(r.id);
       out.push(toCard(r, false));
     }
     return out;
-  }, [backendReports, stored]);
+  }, [backendReports]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

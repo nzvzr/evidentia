@@ -18,8 +18,20 @@ def list_personas(db: Session, company_id: str) -> List[Persona]:
     )
 
 
-def get_persona(db: Session, persona_id: str) -> Optional[Persona]:
-    return db.get(Persona, persona_id)
+def get_persona(db: Session, persona_id: str, company_id: str) -> Optional[Persona]:
+    """Tenant-scoped lookup. `company_id` is mandatory — see documents repo."""
+    return db.execute(
+        select(Persona).where(Persona.id == persona_id, Persona.company_id == company_id)
+    ).scalar_one_or_none()
+
+
+def delete_persona(db: Session, persona_id: str, company_id: str) -> bool:
+    row = get_persona(db, persona_id, company_id)
+    if not row:
+        return False
+    db.delete(row)
+    db.flush()
+    return True
 
 
 def create_persona(

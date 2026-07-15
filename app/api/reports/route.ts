@@ -1,49 +1,68 @@
 import { NextResponse } from "next/server";
+import {
+  applySession,
+  authedBackendFetch,
+  backendUrl,
+  forwardedForHeader,
+  readJsonWithLimit,
+} from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function backend(): string | undefined {
-  return process.env.EVIDENTIA_BACKEND_URL?.replace(/\/$/, "");
-}
+/**
+ * GET /api/reports — the authenticated user's tenant reports.
+ *
+ * Unauthenticated callers get 401 (previously: the shared demo company's data).
+ * The tenant is derived from the session on the backend; this route never sends
+ * a company id.
+ */
+export async function GET(request: Request) {
+  if (!backendUrl()) return NextResponse.json({ reports: [] });
 
-const READ_TIMEOUT_MS = Number(process.env.EVIDENTIA_BACKEND_READ_TIMEOUT_MS) || 8000;
-
-async function fetchWithTimeout(url: string, init: RequestInit = {}, ms = READ_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetch(url, { ...init, cache: "no-store", signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-/** GET /api/reports — proxy to the Python backend; empty list if unavailable. */
-export async function GET() {
-  const b = backend();
-  if (!b) return NextResponse.json({ reports: [] });
-  try {
-    const res = await fetchWithTimeout(`${b}/api/reports`);
-    if (!res.ok) return NextResponse.json({ reports: [] });
-    return NextResponse.json(await res.json());
+    const { res, rotated } = await authedBackendFetch(
+      "/api/reports",
+      {},
+      undefined,
+      forwardedForHeader(request),
+    );
+    if (res.status === 401) {
+      return NextResponse.json({ error: "Not authenticated", reports: [] }, { status: 401 });
+    }
+    if (!res.ok) return NextResponse.json({ reports: [] }, { status: res.status });
+    return applySession(NextResponse.json(await res.json()), rotated);
   } catch {
     return NextResponse.json({ reports: [] });
   }
 }
 
-/** POST /api/reports — proxy a report save to the backend. */
+/** POST /api/reports — save a report into the caller's tenant. */
 export async function POST(request: Request) {
-  const b = backend();
-  const body = await request.json().catch(() => ({}));
-  if (!b) return NextResponse.json({ error: "persistence unavailable" }, { status: 503 });
+  if (!backendUrl()) {
+    return NextResponse.json({ error: "persistence unavailable" }, { status: 503 });
+  }
+
+  const parsed = await readJsonWithLimit(request);
+  if (!parsed.ok) return parsed.response;
+  const body = (parsed.body ?? {}) as Record<string, any>;
+
   try {
-    const res = await fetchWithTimeout(`${b}/api/reports`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return NextResponse.json(await res.json(), { status: res.status });
+    // Only the report and persona are forwarded: ownership (company/user) is
+    // taken from the session by the backend and cannot be set by the client.
+    const { res, rotated } = await authedBackendFetch(
+      "/api/reports",
+      {
+        method: "POST",
+        body: JSON.stringify({ report: body?.report ?? body, personaId: body?.personaId }),
+      },
+      undefined,
+      forwardedForHeader(request),
+    );
+    return applySession(
+      NextResponse.json(await res.json().catch(() => ({})), { status: res.status }),
+      rotated,
+    );
   } catch {
     return NextResponse.json({ error: "backend unreachable" }, { status: 502 });
   }

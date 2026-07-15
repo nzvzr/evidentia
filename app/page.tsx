@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import AuthModal from "@/components/AuthModal";
+import { useSession } from "@/components/SessionProvider";
 import Logo from "@/components/Logo";
 
 const NAV_LINKS = [
@@ -96,8 +97,11 @@ const PRICING = [
 
 export default function LandingPage() {
   const router = useRouter();
+  const { isAuthenticated } = useSession();
   const [authOpen, setAuthOpen] = useState(false);
-  const goCreate = () => router.push("/workspace");
+  // Signed in → straight to the workspace. Otherwise register first: the
+  // workspace is a protected route and would bounce to /login anyway.
+  const goCreate = () => router.push(isAuthenticated ? "/workspace" : "/register");
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0b", color: "#f5f5f3", ...gridBg }}>

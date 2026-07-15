@@ -142,10 +142,22 @@ export interface AppSettings {
   theme: "System" | "Light" | "Dark";
 }
 
-export interface MockUser {
-  name: string;
+/** The authenticated user, as reported by the server. Never holds a token. */
+export interface SessionUser {
+  id: string;
   email: string;
-  company: string;
+  name: string | null;
+  emailVerified: boolean;
+}
+
+export type CompanyRole = "owner" | "admin" | "member";
+
+/** A company the current user belongs to, and their role in it. */
+export interface Membership {
+  id: string;
+  name: string;
+  slug: string;
+  role: CompanyRole;
 }
 
 /* ============================================================

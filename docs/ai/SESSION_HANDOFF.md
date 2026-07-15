@@ -1,87 +1,89 @@
 # Evidentia — Session Handoff
 
 _Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-13 (deployment readiness)._
+_Last updated: 2026-07-14 (platform architecture consolidated; design closed; no code changed)._
 
 ## Where things stand
 
-Backend calibration is complete, verified, and **frozen** (do not extend the eval
-framework without a concrete regression). Latest work prepared a **stable public
-demo deployment** (no new features). Pipeline is deterministic-first with optional
-LLM refinement (off/summary/full/auto), a field-level narrative gate, a full-mode
-structural quality gate, source-constrained generation, deterministic grounding
-repair, and a calibrated conservative `auto` router (resolves to summary; full manual).
+**Architecture design is closed.** This session produced documents only:
 
-- **68 backend unit tests pass**; **frontend `next lint`/`tsc`/`next build` clean.**
-- App works with no key (deterministic) and no backend (TS fallback). Keys are
-  backend-only; `.env`/`.env.local`/`evidentia.db` git-ignored.
-- Benchmarked model: **gpt-4o-mini**. Public report schema unchanged.
+1. **`docs/ai/PLATFORM_ARCHITECTURE.md` (new)** — the platform constitution and
+   architectural source of truth: eleven layers with forbidden
+   responsibilities, the Canonical Analysis Document (CAD) + rendering
+   invariant, domain modules as versioned data packs (compliance = Module #1;
+   engine never branches on taxonomy labels), the two-layer claim pattern
+   system, typed contracts (`SectionRecord v1`, `ClaimSpec v1`, …), complete
+   report provenance (`source_versions` + `engine_versions`), the versioned
+   anchor identity algorithm, staged retrieval with the `retrieval_misses`
+   Stage-3 sensor, the two learning loops (no silent drift), operational
+   corrections, deferred knowledge graph, and the milestone gates.
+2. **`docs/ai/DOCUMENT_INGESTION_ARCHITECTURE.md`** — now *approved with
+   corrections*; review corrections are inlined and marked `[REVIEW]`
+   (full-text scoring, anchor algo versioning, provenance at M4, bounded
+   cache, tenant-fair jobs, claim-time attempts, blob/row ordering, classifier
+   provenance, M5a/M5b split). Where it disagrees with the platform doc, the
+   platform doc wins.
+3. **`docs/ai/DECISIONS.md`** — appended "Platform architecture constitution"
+   (11 settled decisions with rationale).
+4. **`docs/ai/PROJECT_STATE.md`** — consolidation summary added.
+5. **`AGENTS.md`** — reading list + schema guardrail reconciled with the
+   approved architecture.
 
-## Just completed — deployment readiness
+All prior release-gate work stands (274 backend tests + 6 vitest green as of
+the last verified run; PostgreSQL row locks verified on 16.14). **No
+application code, schema or test was touched this session.**
 
-- `backend/Dockerfile` (+ `.dockerignore` that keeps the `*.md` corpus), listens on
-  `$PORT`, container healthcheck; pinned `requirements.txt`.
-- Enriched backend `/health`; new frontend `/api/health` (backend reachability).
-- Env-driven CORS (`EVIDENTIA_CORS_ORIGINS`); proxy timeouts
-  (`EVIDENTIA_BACKEND_TIMEOUT_MS` 45s, `EVIDENTIA_BACKEND_READ_TIMEOUT_MS` 8s);
-  `next.config` `output:"standalone"` + `poweredByHeader:false`; `DATABASE_URL`
-  empty → SQLite default.
-- `DEPLOYMENT.md`: topology, env matrix, deploy + rollback checklists, demo reset,
-  smoke test.
-- **Verified locally (prod build)**: health OK; showcase generate 200 (~6s) and
-  **persisted to SQLite + re-fetched by id**; insufficient corpus → `N/A` markers;
-  all routes 200; **backend-down → deterministic fallback ~6ms**. **Cloud deploy
-  NOT performed** (no hosting credentials/URLs) — local verification only.
+## Next step: M1 (schema + seams) — entry criteria
 
-## Earlier — demo release-readiness (frontend/PDF)
+Do not start M1 without covering (see `PLATFORM_ARCHITECTURE.md` §12):
 
-Honest `/running` loader (no fake %, timeout/fallback/error states); `N/A` rendered
-as "INSUFFICIENT EVIDENCE" (web + PDF); 3-colour severity; citation `section`; empty
-states; PDF sections flow across pages (no clipping); `showcase-residency-emea`
-scenario; uploads labelled demo-only.
+- typed contracts `RawDocument v1`, `DocIR v1`, `SectionRecord v1`,
+  `ClaimSpec v1` (+ stubs for the rest) — the section dict stops being
+  anonymous;
+- `BlobStore` / `JobQueue` / `SectionProvider` Protocols;
+- additive-only migrations (`document_versions`, `document_sections`,
+  `document_blobs`, `ingestion_jobs`);
+- blob/row crash-safe write order + orphaned-blob reconciliation documented in
+  the schema PR;
+- feature flag `EVIDENTIA_TENANT_CORPUS_ENABLED` (default off) — off means
+  today's behavior byte-for-byte;
+- backfill command for existing `content_text` documents.
 
-## Verified backend results (v1, gpt-4o-mini, 22 scenarios)
+## Unresolved (decide later, recorded where noted)
 
-| mode | overall (±std) | grounding | narrative | latency | cost |
-|------|----------------|-----------|-----------|---------|------|
-| deterministic | 93.8 (4.15) | 93.9 | 93.8 | ~1 ms | $0 |
-| summary | 95.4 (3.10) | 93.9 | 96.9 | 5.4 s | $0.0078 |
-| full | 94.8 (3.29) | 93.9 | 95.7 | 24.1 s | $0.0295 |
-| auto | 94.9 (3.76) | 93.9 | 96.0 | 5.2 s | $0.0077 |
+1. CAD migration milestone — deliberately unscheduled; triggered by the first
+   renderer that needs more than `EvidentiaReport` (platform doc §2).
+2. `report.company` = tenant name — direction recorded in `DECISIONS.md`;
+   ships behind the corpus flag with product sign-off at M4.
+3. M9 FTS `tsvector` column: early nullable column vs. maintenance-window
+   rewrite — decide at M9 entry.
+4. `documents.content_text` removal milestone after backfill verification.
+5. DOCX renderer library choice (R-track); OCR timing; retention defaults;
+   Stage-3 embedding model (deferred by design until `retrieval_misses` data).
 
-## Earlier (backend, frozen)
-
-- **Auto-router calibration** (`agents/mode_router.py`, `scripts/calibrate_router.py`):
-  routes from pre-LLM deterministic signals; full requires analytical weakness +
-  evidence + ≥2 opportunity signals + gain > `EVIDENTIA_ROUTER_FULL_GAIN_THRESHOLD`.
-  Oracle gain over always-summary only +0.12 → **auto = summary; full is manual**
-  (full is Pareto-dominated). Routing telemetry emitted per run.
-- **Full-mode structural gate** + **source-constrained (evidence-first) generation**:
-  invalid-code count 31 → 0 upstream; structural gate keeps full safe (0 regressions).
-- **Grounding repair** (IDF scorer) + **narrative gate**; provenance/audit telemetry-only.
-
-## Open concerns / next steps
-
-1. **Matching is lexical, not semantic** (support/repair/structural scorers). Next:
-   category/persona affinity refinement or embeddings (no LLM).
-2. **Auto never routes to full on this corpus** (intentional; full is Pareto-dominated).
-   Re-run `scripts/calibrate_router.py` if the corpus/model changes — the router will
-   start selecting full when evidence justifies it.
-3. **Exact-citation match 0.833** (family/document 1.0): risks bind to the
-   highest-signal section in the correct document; the 4 split metrics show this.
-
-## How to verify
+## How to verify this session
 
 ```bash
-cd backend && source .venv/bin/activate
-python -m pytest -q                       # expect 68 passed
-python scripts/run_benchmark.py --modes deterministic,summary,full,auto
-python scripts/calibrate_router.py        # oracle + policy comparison + verdict
-# frontend: npm run build
+git status          # only docs/ai/* and AGENTS.md modified/added; no code
+cd backend && python -m pytest -q   # unchanged: 274 passed, 2 skipped (SQLite)
 ```
 
 ## Reminders
 
-- Update `PROJECT_STATE.md` (concise) and this file (< 100 lines) after changes.
 - Append to `DECISIONS.md`; never rewrite past entries.
-- Don't break the `EvidentiaReport` schema; keep the deterministic fallback.
+- Don't break the public `EvidentiaReport` schema — and don't casually *add*
+  fields either: every proposed field must answer "CAD concept, module
+  extension, or renderer concern?" (platform doc §2).
+- Engine code must never branch or string-match on a taxonomy label.
+- Retrieval proposes; the deterministic gate disposes. Embeddings/glossaries
+  widen candidates only.
+- Renderers: pure transformation of an immutable snapshot — no LLM, no
+  retrieval, no scoring, no claim changes.
+- Reports must carry `source_versions` + `engine_versions` from the first
+  customer report (M4); provenance cannot be added retroactively.
+- `company_id` never comes from client input — only from `CompanyContext`.
+- Authenticated routes never fall back to the TypeScript pipeline.
+- A 200 from generation means **persisted** — never return an unsaved report.
+- **Take the lock, then re-read with `populate_existing`, then decide.**
+- **Timing proofs need `time.perf_counter()`**, not `time.monotonic()`.
+- **Never unset `EVIDENTIA_BACKEND_URL` as a rollback** — it disables auth.

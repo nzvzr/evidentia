@@ -18,8 +18,12 @@ def list_reports(db: Session, company_id: str) -> List[Report]:
     )
 
 
-def get_report(db: Session, report_id: str) -> Optional[Report]:
-    return db.get(Report, report_id)
+def get_report(db: Session, report_id: str, company_id: str) -> Optional[Report]:
+    """Tenant-scoped lookup. `company_id` is mandatory: this is what closes the
+    report IDOR — a report id from another tenant resolves to None (→ 404)."""
+    return db.execute(
+        select(Report).where(Report.id == report_id, Report.company_id == company_id)
+    ).scalar_one_or_none()
 
 
 def create_report(
@@ -56,8 +60,8 @@ def create_report(
     return row
 
 
-def delete_report(db: Session, report_id: str) -> bool:
-    row = db.get(Report, report_id)
+def delete_report(db: Session, report_id: str, company_id: str) -> bool:
+    row = get_report(db, report_id, company_id)
     if not row:
         return False
     db.delete(row)

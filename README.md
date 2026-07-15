@@ -26,9 +26,17 @@ Evidentia now includes:
 - a **report library** and interactive dashboard
 - a **playbook / PDF export** page (print-ready A4)
 - a **documents manager**
-- **localStorage** report persistence
-- **no database**
-- **no required external API key**
+- **database-backed, tenant-scoped** report and document persistence (PostgreSQL)
+- **authentication and multi-tenancy**, owned by the Python backend
+- **no required external API key** (the LLM layer is optional; generation is
+  deterministic without one)
+
+The Python backend is **required**. It owns authentication, tenancy and
+persistence, and authenticated routes have no fallback: with the backend
+unreachable or `EVIDENTIA_BACKEND_URL` unset, they return **503**. Authenticated
+reports live only in the database, never in `localStorage`. The TypeScript
+pipeline is reachable only at the anonymous public-demo route
+(`/api/demo/generate-workflow`), which persists nothing.
 
 ---
 
@@ -40,7 +48,7 @@ When you select documents, a market, and a persona (or a custom role) and click 
 Document Ingest → Persona Modeler → Semantic Retrieval → Risk Analyzer → Citation Binder → Metrics Agent → Playbook Composer
 ```
 
-Each agent contributes one structured part of the final report — parsed sections, a persona brief, ranked evidence, risks, bound citations, metrics, and the assembled playbook. The pipeline runs in the API route and can also run directly in the browser as an offline fallback, so the demo works with no backend service and no API key.
+Each agent contributes one structured part of the final report — parsed sections, a persona brief, ranked evidence, risks, bound citations, metrics, and the assembled playbook. The pipeline runs in the Python backend, which authenticates the caller and persists the report to their organization. A public, anonymous sample of the same pipeline is available at `/api/demo/generate-workflow` (no account, no persistence).
 
 ---
 
@@ -48,7 +56,7 @@ Each agent contributes one structured part of the final report — parsed sectio
 
 Evidentia ships with two interchangeable generation modes behind the same API and UI:
 
-- **Deterministic (default).** With no keys configured, the app runs a rule-based multi-agent pipeline over the local demo corpus. It is fully offline, reproducible, and requires **no API key**.
+- **Deterministic (default).** With no LLM key configured, the pipeline is rule-based over the document corpus: reproducible, and requires **no API key**. (An API key is optional; the *backend* is not — it owns authentication and tenancy.)
 - **LLM-assisted (optional).** With `OPENAI_API_KEY` set and `EVIDENTIA_USE_LLM=true`, LLM agents **refine** the deterministic baseline — improving persona modeling, workflows, risks, citations, and the report narrative. The deterministic output is always produced first and is used as the fallback for any step that fails.
 
 Key guarantees:
@@ -76,7 +84,7 @@ The report dashboard shows a **Deterministic** / **LLM-assisted** badge, and the
 
 A parallel **FastAPI** implementation of the same pipeline lives in [`backend/`](./backend). It returns the identical `EvidentiaReport` JSON and can own the LLM keys server-side.
 
-- The Next.js API route (`app/api/generate-workflow/route.ts`) becomes a **proxy**: if `EVIDENTIA_BACKEND_URL` is set, it forwards requests to the Python backend; otherwise (or if the backend is offline/errors) it uses the built-in TypeScript pipeline.
+- The Next.js API route (`app/api/generate-workflow/route.ts`) is an authenticated **proxy** to the Python backend. It has **no fallback**: if the backend cannot validate the session, it returns 503 and generates nothing — a report on this route belongs to a real account and is persisted to that tenant. The TypeScript pipeline survives only at `/api/demo/generate-workflow` (anonymous, public corpus, persists nothing).
 - The frontend never sees API keys — the Python backend owns them.
 
 Run the backend:
@@ -122,7 +130,7 @@ Then open **http://localhost:3000** and walk the flow:
 4. `/reports/[id]` — the persona-aware dashboard. Click **Export playbook (PDF)**.
 5. `/playbook/[id]/print` — a dedicated 6-page A4 export preview. Click **Print / Save as PDF**.
 
-Generated reports persist in `localStorage`; `/reports`, `/playbooks`, and `/documents` list the demo corpus and any reports you generate.
+Generated reports are persisted **in the database, scoped to your organization**, and re-fetched from the backend by id; `/reports`, `/playbooks`, and `/documents` list the demo corpus and the reports your tenant has generated. Nothing authenticated is cached in `localStorage` — only the anonymous public demo (`evidentia:public-demo:*`) may persist in the browser.
 
 Production build:
 
@@ -578,14 +586,15 @@ It flagged 4 risks, attached 11 citations, and generated a workflow for building
 
 ```txt
 Frontend:  Next.js (App Router), TypeScript, Tailwind CSS
-Backend:   Next.js API route (/api/generate-workflow)
+BFF:       Next.js API routes — hold httpOnly session cookies, proxy to the backend
+Backend:   Python FastAPI (required) — authentication, tenancy, persistence
 Pipeline:  Deterministic multi-agent orchestrator + optional LLM refinement (OpenAI)
-Storage:   localStorage (no database)
-Auth:      Mock only (no external auth provider)
-Deployment: Vercel
+Storage:   PostgreSQL (managed, in production). SQLite is local development ONLY.
+Auth:      Email + password; JWT access tokens + rotating refresh tokens
+Deployment: Vercel (frontend) + a container host (backend)
 ```
 
-The MVP works fully offline with a local demo corpus and deterministic agents — no API key required. An optional LLM synthesis step can be layered behind the same pipeline interface later.
+The pipeline runs deterministically with no API key. The Python backend is required in all cases: it owns authentication, tenant isolation and persistence.
 
 ---
 
@@ -660,7 +669,7 @@ evidentia/
 │   ├── tools/
 │   │   └── documentTools.ts      # deterministic app-side tools for agents
 │   ├── env.ts                    # server-only env config (never client-exposed)
-│   ├── reportsStore.ts           # localStorage report persistence
+│   ├── reportsStore.ts           # PUBLIC DEMO report only (never authenticated data)
 │   ├── workspaceMapping.ts       # UI selection → pipeline input
 │   ├── pendingRun.ts
 │   ├── types.ts
@@ -742,16 +751,19 @@ The core workflow should work with demo data and deterministic logic, with optio
 
 ## Implementation Philosophy
 
-The prototype should be honest and practical:
+Honest and practical:
 
 - deterministic agents for reliability
-- optional LLM calls for synthesis
-- no database required
-- no authentication required
+- optional LLM calls for synthesis (generation works with no API key)
+- authentication, tenancy and persistence owned by the backend — **required**, with
+  no degraded mode: authenticated routes return 503 rather than inventing a session
+  or a report
+- managed PostgreSQL in production (SQLite is local development only)
 - no real RAG infrastructure required for the MVP
 - clean modular architecture
 - polished UI first
-- demo flow end-to-end
+- demo flow end-to-end — but the public demo is a *separate, anonymous* route that
+  persists nothing, never a fallback for a signed-in user
 
 This is a hackathon MVP showing the core interaction:
 

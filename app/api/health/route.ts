@@ -6,31 +6,69 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/health — frontend liveness/readiness probe.
  *
- * Reports whether a Python backend is configured and, if so, whether it is
- * reachable (best-effort, short timeout). Never exposes secrets or backend
- * internals. The app is always usable via the deterministic TypeScript pipeline
- * even when the backend is absent, so this endpoint returns 200 regardless.
+ * Evidentia is an authenticated, multi-tenant app: the backend is REQUIRED. There
+ * is no "deterministic fallback" mode for authenticated traffic — if the backend
+ * is unreachable, product routes return 503 and nothing is generated or saved.
+ * (This endpoint used to report `mode: "deterministic-fallback"`, describing an
+ * architecture that no longer exists.)
+ *
+ * The only anonymous path is `/api/demo/generate-workflow`, which runs the public
+ * sample pipeline in this process and persists nothing, so it stays available even
+ * when the backend is down. That is reported separately as `demoAvailable`.
+ *
+ * Returns 503 when the backend is required but unreachable, so an orchestrator
+ * sees an unhealthy instance rather than a green one that cannot serve the product.
  */
 export async function GET() {
   const backendUrl = process.env.EVIDENTIA_BACKEND_URL?.replace(/\/$/, "");
+
   const base = {
-    status: "ok" as const,
     service: "evidentia-frontend",
     backendConfigured: Boolean(backendUrl),
+    /** The public sample pipeline is in-process; it never needs the backend. */
+    demoAvailable: true,
     time: new Date().toISOString(),
   };
 
   if (!backendUrl) {
-    return NextResponse.json({ ...base, backendReachable: false, mode: "deterministic-fallback" });
+    return NextResponse.json(
+      {
+        ...base,
+        status: "unhealthy",
+        backendReachable: false,
+        mode: "unconfigured",
+        detail: "EVIDENTIA_BACKEND_URL is not set: authentication is unavailable.",
+      },
+      { status: 503 },
+    );
   }
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(`${backendUrl}/health`, { cache: "no-store", signal: controller.signal });
+    const res = await fetch(`${backendUrl}/health`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
     clearTimeout(timeout);
-    return NextResponse.json({ ...base, backendReachable: res.ok, mode: res.ok ? "backend" : "deterministic-fallback" });
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { ...base, status: "unhealthy", backendReachable: false, mode: "backend-unreachable" },
+        { status: 503 },
+      );
+    }
+
+    return NextResponse.json({
+      ...base,
+      status: "ok",
+      backendReachable: true,
+      mode: "backend",
+    });
   } catch {
-    return NextResponse.json({ ...base, backendReachable: false, mode: "deterministic-fallback" });
+    return NextResponse.json(
+      { ...base, status: "unhealthy", backendReachable: false, mode: "backend-unreachable" },
+      { status: 503 },
+    );
   }
 }

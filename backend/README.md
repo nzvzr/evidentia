@@ -2,12 +2,14 @@
 
 A FastAPI implementation of the Evidentia multi-agent pipeline. It mirrors the
 TypeScript deterministic pipeline and returns the same `EvidentiaReport` JSON the
-Next.js frontend consumes. It works fully offline with **no API key**, and can
+Next.js frontend consumes. It runs deterministically with **no API key**, and can
 optionally use an LLM (OpenAI) for refinement.
 
-The Next.js API route (`app/api/generate-workflow/route.ts`) proxies to this
-backend when `EVIDENTIA_BACKEND_URL` is set, and falls back to the built-in
-TypeScript pipeline if the backend is unavailable.
+The Next.js API route (`app/api/generate-workflow/route.ts`) is an authenticated
+proxy to this backend. It has **no fallback**: if the backend cannot validate the
+session, it returns 503 and nothing is generated or saved. The TypeScript pipeline
+is reachable only at the anonymous `/api/demo/generate-workflow` (public corpus,
+persists nothing).
 
 ## Endpoints
 
@@ -55,9 +57,11 @@ uvicorn app.main:app --reload --port 8000
 The backend persists generated reports (and supports documents, personas,
 companies, users) via SQLAlchemy 2.x.
 
-- **SQLite (default, zero setup)** — if `DATABASE_URL` is empty, a local file
-  `backend/evidentia.db` is used. Tables are created automatically on startup.
-- **PostgreSQL** — set `DATABASE_URL` and run migrations:
+The database is the **only** store for authenticated data. Authentication, tenancy
+and report persistence all require it — there is no degraded mode and no
+`localStorage` fallback.
+
+- **PostgreSQL — required in production.** Set `DATABASE_URL` and run migrations:
 
 ```bash
 # .env
@@ -65,8 +69,17 @@ DATABASE_URL=postgresql://user:password@localhost:5432/evidentia
 EVIDENTIA_DB_ENABLED=true
 ```
 
-Set `EVIDENTIA_DB_ENABLED=false` to disable persistence entirely (the API still
-generates and returns reports; the frontend falls back to localStorage).
+- **SQLite (empty `DATABASE_URL`) — local development ONLY.** A local file
+  `backend/evidentia.db` is used and tables are created on startup. **Do not run a
+  public beta on it:** container filesystems are usually ephemeral, so a redeploy
+  silently destroys every user and report. Its concurrency model also differs from
+  PostgreSQL's (a whole-database write lock rather than `SELECT … FOR UPDATE` row
+  locks).
+
+`EVIDENTIA_DB_ENABLED=false` disables persistence and is **refused at startup in
+production**. With it set in development, authenticated generation returns **503
+`persistence_unavailable`** rather than an unsaved report — a 200 from
+`/api/generate-workflow` always means the report was committed.
 
 ### Migrations (Alembic)
 
@@ -312,4 +325,5 @@ EVIDENTIA_BACKEND_URL=http://localhost:8000
 ```
 
 With that set, the Next.js route forwards requests to this backend. Without it
-(or if the backend is offline), the frontend uses the TypeScript pipeline.
+the frontend returns 503 for authenticated generation — there is no fallback. The
+TypeScript pipeline is reachable only at the anonymous `/api/demo/generate-workflow`.

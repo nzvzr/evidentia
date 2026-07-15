@@ -4,7 +4,6 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { generateReportForId } from "@/data/demoReports";
-import { resolveStoredReport } from "@/lib/reportsStore";
 import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
 
@@ -46,16 +45,25 @@ export default function ReportDetailPage() {
   const params = useParams<{ id: string }>();
   const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
 
-  const [report, setReport] = useState<EvidentiaReport>(() => generateReportForId(id));
+  const [report, setReport] = useState<EvidentiaReport | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
   const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    // Backend (DB) first, then localStorage / deterministic fallback.
+    // The backend is the only source of truth. A 404 means the report does not
+    // exist *for this tenant* — we must NOT fall back to a locally cached or
+    // locally generated report, which is how another account's data (or a fake
+    // report) could be rendered as if it were real.
     (async () => {
       const backendReport = await fetchBackendReport(id);
       if (cancelled) return;
-      setReport(backendReport ?? resolveStoredReport(id, generateReportForId));
+      if (backendReport) {
+        setReport(backendReport);
+        setState("ready");
+      } else {
+        setState("missing");
+      }
     })();
     const t = setTimeout(() => setChartReady(true), 160);
     return () => {
@@ -63,6 +71,35 @@ export default function ReportDetailPage() {
       clearTimeout(t);
     };
   }, [id]);
+
+  if (state !== "ready" || !report) {
+    return (
+      <AppShell active="reports">
+        <div style={{ padding: 48, maxWidth: 560 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em", margin: 0 }}>
+            {state === "loading" ? "Loading report…" : "Report not found"}
+          </h1>
+          {state === "missing" && (
+            <>
+              <p style={{ fontSize: 13.5, color: "var(--sub)", marginTop: 10, lineHeight: 1.6 }}>
+                This report doesn&apos;t exist, or it belongs to a different organization.
+              </p>
+              <button
+                onClick={() => router.push("/reports")}
+                style={{
+                  marginTop: 18, fontFamily: "inherit", fontSize: 14, fontWeight: 600,
+                  color: "#fff", background: "#0a0a0b", border: "none",
+                  padding: "11px 18px", borderRadius: 9, cursor: "pointer",
+                }}
+              >
+                Back to reports
+              </button>
+            </>
+          )}
+        </div>
+      </AppShell>
+    );
+  }
 
   const { metrics, personaBrief } = report;
   const openPrint = () => window.open(`/playbook/${report.id}/print`, "_blank");
