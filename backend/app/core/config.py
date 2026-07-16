@@ -336,6 +336,27 @@ class Settings(BaseSettings):
     # the whole rollback (reports are snapshots — nothing to migrate back).
     evidentia_tenant_corpus_enabled: bool = False
 
+    # --- document ingestion (M2: MD/TXT upload + worker) ---
+    # Per-file byte cap, enforced while the upload streams (Content-Length is
+    # never trusted alone). MD/TXT only in M2, so the cap is modest; later
+    # formats raise it deliberately.
+    evidentia_upload_max_file_bytes: int = 2 * 1024 * 1024
+    # Extracted-character cap: oversized text fails with a typed error, never
+    # silently truncated.
+    evidentia_max_extracted_chars: int = 1_000_000
+    # Files accepted per upload request (M2: exactly one).
+    evidentia_upload_max_files: int = 1
+    # Quota foundations (abuse bounds now, plan-tier levers later).
+    evidentia_tenant_max_documents: int = 500
+    evidentia_tenant_max_total_bytes: int = 100 * 1024 * 1024
+    # Ingestion worker: bounded in-process pool (single-instance posture).
+    evidentia_ingestion_worker_count: int = 1
+    evidentia_ingestion_poll_seconds: float = 2.0
+    # A running job whose heartbeat is older than this is considered abandoned
+    # and is requeued (or terminally failed at the attempts cap).
+    evidentia_ingestion_stale_seconds: int = 300
+    evidentia_ingestion_max_attempts: int = 3
+
     # --- auth ---
     # Signing key for access tokens. MUST be set in production; startup fails if
     # it is left at the dev default while evidentia_env == "production".
@@ -413,6 +434,15 @@ class Settings(BaseSettings):
     # tenants). Registration still creates exactly one org for the registrant.
     rl_company_create_user_limit: int = 5
     rl_company_create_user_window: int = 86400
+
+    # Upload limits (the ingestion-spending endpoints) — counted before any
+    # multipart parsing work, per IP, per user and per tenant.
+    rl_upload_ip_limit: int = 40
+    rl_upload_ip_window: int = 3600
+    rl_upload_user_limit: int = 20
+    rl_upload_user_window: int = 3600
+    rl_upload_tenant_limit: int = 60
+    rl_upload_tenant_window: int = 3600
 
     # Generation limits (the LLM-spending endpoint) — deliberately separate from
     # and much tighter than the auth budgets, because each call costs money.

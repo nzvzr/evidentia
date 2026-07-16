@@ -25,6 +25,15 @@ class BodySizeLimitMiddleware:
         self.app = app
         self._max_bytes = max_bytes
 
+    # Routes that legitimately carry a file need a larger cap than the JSON
+    # API. The raised cap covers exactly the multipart upload endpoints; the
+    # per-FILE byte limit is still enforced while the upload handler streams
+    # the part (bytes are counted here too, so Content-Length is never the
+    # only guard on either path).
+    _UPLOAD_PATH_PREFIX = "/api/documents"
+    _UPLOAD_PATH_SUFFIXES = ("/upload", "/versions")
+    _MULTIPART_OVERHEAD = 64 * 1024
+
     @property
     def max_bytes(self) -> int:
         if self._max_bytes is not None:
@@ -33,12 +42,26 @@ class BodySizeLimitMiddleware:
 
         return get_settings().evidentia_max_body_bytes
 
+    def _limit_for(self, scope: Scope) -> int:
+        if self._max_bytes is not None:
+            return self._max_bytes
+        path = scope.get("path", "")
+        if path.startswith(self._UPLOAD_PATH_PREFIX) and path.endswith(self._UPLOAD_PATH_SUFFIXES):
+            from app.core.config import get_settings
+
+            settings = get_settings()
+            return max(
+                settings.evidentia_max_body_bytes,
+                settings.evidentia_upload_max_file_bytes + self._MULTIPART_OVERHEAD,
+            )
+        return self.max_bytes
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        limit = self.max_bytes
+        limit = self._limit_for(scope)
 
         # 1. Declared oversize: refuse without reading the body.
         for key, value in scope.get("headers", []):

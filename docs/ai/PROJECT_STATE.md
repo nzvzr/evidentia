@@ -1,6 +1,6 @@
 # Evidentia — Project State
 
-_Concise snapshot. Update after meaningful changes. Last updated: 2026-07-15._
+_Concise snapshot. Update after meaningful changes. Last updated: 2026-07-16._
 
 ## Summary
 
@@ -8,6 +8,168 @@ Persona-aware documentation agent. Next.js frontend + Python FastAPI backend.
 Deterministic-first pipeline; optional LLM refinement layered on top.
 **Authenticated and multi-tenant**: every resource belongs to an organization,
 and every query is tenant-scoped.
+
+## M2 implemented — MD/TXT upload + ingestion spine (verified 2026-07-16)
+
+Everything in the M2 milestone (upload → blob → durable job → tenant-fair
+worker claim → extract → normalize → sectionize → atomic persist → status UI),
+gated on `EVIDENTIA_TENANT_CORPUS_ENABLED` (default **off** = pre-M2 behavior
+byte-for-byte; upload endpoints return an explicit 403
+`tenant_corpus_disabled`, the worker never starts, queued jobs are not
+processed).
+
+- **Upload API** (`POST /api/documents/upload`, multipart): authenticated +
+  tenant-scoped, strict `.md`/`.txt` allowlist with content sniffing (binary
+  magic/NUL/non-UTF-8 rejected; declared-type mismatch rejected), bounded
+  streaming reads with SHA-256 from actual bytes, filename sanitization
+  (display-only; storage is content-addressed behind BlobStore), typed
+  user-safe errors, 202 on a new job / 200 on explicit duplicate. Also
+  `POST /{id}/versions` (immutable version N+1; identical bytes = explicit
+  no-op; identical bytes on a FAILED version = retry reusing the row/blob) and
+  `POST /{id}/retry` (failed-only, 409 otherwise). Abuse bounds: per-file byte
+  cap (streaming-enforced; the body-limit middleware raises the request cap
+  only for the upload routes), extracted-char cap, one file per request,
+  per-IP/user/tenant upload rate limits, and tenant document-count +
+  stored-byte quotas checked under the company row lock (no check-then-write
+  race). JSON `POST /api/documents` unchanged with the flag off; with it on it
+  routes through the same spine (version 1 + blob + job) **under the same
+  abuse bounds as multipart** (review fix 2026-07-16): upload rate budgets
+  counted first, company row lock, count + byte quotas on the actual UTF-8
+  bytes, one transaction, same typed codes, rejection leaves no rows.
+- **Queue** (`DatabaseJobQueue`): tenant-fair claim (one candidate per tenant
+  = its oldest queued job; tenants served round-robin, verified A/B
+  alternation), claim-time `attempts` increment, atomic conditional-UPDATE
+  ownership transitions (two-worker race leaves exactly one owner; verified on
+  PostgreSQL 16), heartbeat (running-only), complete, retryable requeue vs
+  terminal fail at the attempts cap (3), stale-running recovery (requeue below
+  cap / terminal at cap) at startup and periodically.
+- **Worker** (`app/ingestion/worker.py`): in-process bounded thread pool
+  (default 1) started from app startup ONLY when flag+DB are on; idempotent
+  `start()` (no duplicate pools under reload/repeated lifespans); event-based
+  interruptible polling (no busy spin); graceful shutdown on app shutdown;
+  typed retryable/terminal error classification; poison documents hit the cap
+  and stop; tracebacks only in server logs, never document text.
+- **Parsers → DocIR v1** (`app/ingestion/parsers.py`): Markdown via
+  markdown-it-py (`js-default`, html=False — raw HTML stays literal text,
+  never executed; no remote fetches): headings 1–6 with hierarchy, paragraphs,
+  ordered/unordered/nested lists, blockquotes, fenced/indented code kept
+  verbatim, tables → pipe-text, images → honest
+  `[content omitted: image "alt"]` markers, links keep authored text (hrefs in
+  meta). Plain text via cautious deterministic heuristics: numbered /
+  decimal-nested / short-ALL-CAPS / underline headings, adjacency+depth rules
+  so numbered lists never become headings, long sentences never become
+  headings, <2 candidates ⇒ paragraph-grouping fallback. Unsupported formats
+  fail typed. Deterministic; parser name/version recorded per version.
+- **Normalization** (`app/ingestion/normalize.py`): UTF-8 only (BOM stripped;
+  NUL ⇒ binary), CRLF/CR → `\n`, Unicode NFC, control chars stripped (tabs and
+  newlines kept), extracted-char cap fails typed — never lossy replacement,
+  never invented text.
+- **Sectionizer** (`app/ingestion/sectionizer.py`, `m2.1`): heading-aware
+  grouping preserving hierarchy/order, split at block boundaries at 4,000
+  chars (single oversized blocks split at line→sentence boundaries; code/table
+  blocks kept whole when they fit), undersized trailing split-fragments (<200)
+  merge back, excerpt ≤1,200 chars derived from the full text, token/count
+  metadata from the FULL text, omitted-content flags preserved, deterministic
+  retries. **Transitional identity**: ordinal-based internal
+  `s0007`/`pre-m3:s0007` ids + `anchor_algo_version="pre-m3-transitional"` —
+  the M3 anchor algorithm is not pre-empted and no public citation identity is
+  minted (see `DECISIONS.md` 2026-07-16).
+- **State machine** (`app/ingestion/pipeline.py`): validated transitions
+  pending→extracting→sectioning→ready / →failed (retry resets failed→pending;
+  `classifying` reserved for M3). Sections are deleted+rewritten and the
+  version marked `ready` in ONE transaction — no partial visibility, retries
+  never duplicate rows. `current_version_id` flips at exactly one guarded site
+  and only to `ready`; a failed new version never degrades a ready document.
+  Typed `error_code` + bounded user-safe `error_detail` persisted.
+- **Backfill integration**: M1-backfilled `content_text` jobs process safely
+  (declared MD/TXT source honored via mime/filename/type resolution), no
+  version-1 recreation, re-runs idempotent, `content_text` untouched.
+- **APIs**: flag-on serialization adds one `ingestion` object (status, stage,
+  versionNo, filename, detectedFormat, byteSize, sectionCount, errorCode/
+  errorMessage, updatedAt, sourceType) + a `tenantCorpus` config object on the
+  list; flag-off shapes are byte-for-byte pre-M2 (test-pinned). Never exposed:
+  blob keys, paths, section text, citation ids, tracebacks, queue leases.
+  Cross-tenant ids stay 404-shaped.
+- **Frontend**: BFF routes `app/api/documents/upload` + `[id]/versions`
+  (bounded multipart passthrough preserving the boundary; 401/413/429/503
+  propagated; no client-side fallback) and `[id]/retry`.
+  `lib/tenantDocuments.ts` + reworked Documents page: real upload with format/
+  size guidance, honest per-stage labels (Queued/Extracting/Sectioning/
+  Processed/Failed — "Processed" explicitly means *not yet used for report
+  generation*), typed failure messages with Retry, per-document New version,
+  bounded polling (2.5 s) only while a document is actively processing with
+  stale-response guard + Strict-Mode-safe cleanup, real metadata only (no
+  fabricated pages/percentages), demo corpus relabeled "SAMPLE CORPUS (DEMO)"
+  when the flag is on. Flag-off UI unchanged (`lib/uploads.ts` superseded by
+  the new hook).
+- **Report generation untouched**: tenant ids in a selection resolve against
+  the demo corpus only (unknown ⇒ demo fallback); test + live smoke prove no
+  tenant text can appear in a report and no tenant/demo mixing occurs. Tenant
+  documents never appear in the workspace generation picker (static demo
+  corpus).
+- **Verification (all green, re-run after the 2026-07-16 review fixes)**:
+  backend **444 passed, 6 skipped** on SQLite (M2 tests: 38
+  parsers/normalization, 20 sectionizer, 31 queue/worker/pipeline/backfill,
+  45 upload API incl. 7 new JSON-create limit/quota tests); PostgreSQL 16
+  profile: 100 ingestion/upload/seam tests + 18 concurrency tests all green
+  (claim race, enqueue race, row locks, and the two new JSON-create quota
+  boundary races). Alembic upgrade→downgrade base→upgrade head cycled
+  on SQLite AND PostgreSQL 16 (no new migration needed — M1 schema was
+  sufficient; `alembic check` shows only pre-existing legacy nullable drift,
+  none on ingestion tables). Frontend: 45 vitest (17 new Documents tests),
+  ESLint 0 errors (same 6 pre-existing warning class), `tsc` clean, production
+  build clean. Live smoke (PostgreSQL + `next start` + real session): MD
+  upload 202 → pending → ready (3 sections), duplicate 200 explicit (no new
+  rows), TXT 202 → ready, `.pdf` → 415 typed, generation 200 with demo-only
+  citations, exactly 1 persisted report, backend restart → both documents
+  visible + a crash-simulated stale running job requeued and reprocessed
+  without duplicate sections, flag-off restart → upload 403
+  `tenant_corpus_disabled`, pre-M2 list shape, generation still 200.
+- **Deferred to M3+**: anchors/citation prefixes/classification/injection
+  flags (M3), TenantCorpusProvider + provenance + full-text scoring +
+  version-aware cache + `report.company` (M4), claim patterns (M5),
+  HTML/DOCX/PDF parsers (M6/M7), soft delete + versioning UX (M8), FTS (M9).
+
+## M2 independent review remediation (2026-07-16)
+
+The complete M2 diff was independently reviewed: **approve with fixes**, no
+commit blockers (437 SQLite tests, PostgreSQL 16 profiles, 45 frontend tests,
+Alembic cycles, tenant isolation, dedupe/quota concurrency, queue claim
+correctness, parser/sectionizer determinism, and demo-corpus-only generation
+all verified by the reviewer). Both fixes are applied; full text in
+`DECISIONS.md` 2026-07-16 (review remediation entry).
+
+- **Binding M2→M3 lifecycle contract** (M3 entry criterion + M4 provider
+  invariant): versions stamped `anchor_algo_version="pre-m3-transitional"`
+  are **immutable** — M3 never mutates the ready version row, its sections,
+  its transitional anchor/citation ids, or its `manifest_sha256`. M3
+  finalization = re-ingestion of the retained source blob into a **new**
+  version row (final anchor algorithm, final citation identities,
+  deterministic classification, new manifest, ready, controlled
+  `current_version_id` flip); the old version stays byte-for-byte unchanged.
+  M4's TenantCorpusProvider must **reject any `pre-m3-transitional` version
+  even if `current_version_id` points to it** — `status == "ready"` alone is
+  never generation eligibility.
+- **Flag-on JSON create quota bypass closed**: `POST /api/documents` with the
+  corpus flag on now pays the same abuse bounds as multipart via the shared
+  service helpers (rate limit → company row lock → count/byte quotas on
+  actual UTF-8 bytes → rows, one transaction, typed codes, no rows on
+  rejection). Flag-off behavior byte-for-byte unchanged.
+
+### Deferred debt (recorded, deliberately NOT fixed in this pass)
+
+- **Worker ownership fencing** (blocker only for long-running formats, i.e.
+  before PDF/DOCX/OCR in M6/M7 — not required at current MD/TXT bounds):
+  `complete`/`fail` carry no lease/ownership epoch, so a stale holder whose
+  job was reclaimed after stale-recovery could complete/fail the new holder's
+  attempt. Needed: periodic heartbeats *during* processing, a lease token or
+  claimed-attempt epoch, complete/fail conditional on current ownership, and
+  a regression test (A goes stale → B reclaims → A can no longer
+  complete/fail B's lease).
+- **Flag-off legacy upload detail drawer** (low-priority UX compat): the
+  pre-M2 session-upload detail drawer went away when `lib/uploads.ts` was
+  superseded by the ingestion UI. Restore only if it turns out to be a
+  trivial isolated change; not a reason to redesign the Documents page.
 
 ## Pre-M2 frontend generation stabilization (2026-07-15)
 
@@ -637,10 +799,17 @@ container/health/config work, which still stands.
 
 ## Tests
 
-- **311 passing** backend tests (+3 skipped on SQLite: the PostgreSQL-only tests)
-  + **6 vitest** (demo limiter): `python -m pytest -q` (from `backend/`) and
-  `npm test`. The concurrency file verified against real PostgreSQL 16.14 across
-  **15 consecutive runs** (all 15 tests, 0 failures).
+- **444 passing** backend tests (+6 skipped on SQLite: the PostgreSQL-only
+  tests) + **45 vitest**: `python -m pytest -q` (from `backend/`) and
+  `npm test`. The concurrency file verified against real PostgreSQL 16.14
+  across **15 consecutive runs** (all 15 auth/tenancy tests, 0 failures) and
+  again on 2026-07-16 (18 tests incl. the JSON-create quota races); the M2
+  ingestion/queue/upload suites additionally verified against PostgreSQL 16
+  (see the M2 section above).
+  - **134 M2 tests** (`test_ingestion_parsers.py` 38, `test_sectionizer.py`
+    20, `test_ingestion_queue_worker.py` 31, `test_upload_api.py` 45 — incl.
+    the 7 review-fix JSON-create limit/quota/rate tests): see the M2 section
+    above for coverage.
   - **37 M1 tests** (`test_contracts.py` 13, `test_ingestion_schema_and_seams.py`
     24): SectionRecord→currency projection pinned against the demo reader's
     real output; closed contract vocabularies; schema uniqueness constraints
@@ -651,7 +820,7 @@ container/health/config work, which still stands.
     adoption preserving the outer transaction; DemoCorpusProvider ≡
     document_reader; documents API key-set unchanged; corpus flag default off;
     backfill correctness/idempotency/company-filter/dry-run.
-  - **13 concurrency tests** (`test_concurrency.py`) — each worker thread gets its
+  - **18 concurrency tests** (`test_concurrency.py`) — each worker thread gets its
     own Session; worker exceptions are collected and asserted empty; `pytest.ini`
     promotes `PytestUnhandledThreadExceptionWarning` to an **error**. Covers: a login
     holding the OLD password racing a password reset (the old password must never
@@ -663,11 +832,15 @@ container/health/config work, which still stands.
     *after* the lock was released, so overlapping-but-unserialized threads cannot fake
     a pass); concurrent ownership transfer vs demotion leaving `company.owner_id` on a
     real owner; and the identity-map staleness that caused H2, isolated from any race.
-    Three further tests exercise real PostgreSQL behaviour and **skip loudly** unless
-    `EVIDENTIA_TEST_DATABASE_URL` is set: two for row locks, and one proving two
+    Five further tests exercise real PostgreSQL behaviour and **skip loudly** unless
+    `EVIDENTIA_TEST_DATABASE_URL` is set: two for row locks, one proving two
     sessions concurrently enqueueing the same document version leave exactly one
     live ingestion job (the loser adopts the survivor via the partial unique
-    index + savepoint recovery).
+    index + savepoint recovery), and two proving two concurrent flag-on JSON
+    creates racing for the last quota slot (document count / stored bytes)
+    serialize on the company row lock — exactly one 201, a typed
+    `document_quota_exceeded`/`storage_quota_exceeded` loser, and persisted
+    rows/bytes within quota.
   - **33 rate-limit / hardening tests** (`test_rate_limit.py`): fixed-window
     correctness + expiry + Retry-After, independent budgets, `check_all` counting
     every rule (so tripping the IP budget cannot dodge the account budget); login

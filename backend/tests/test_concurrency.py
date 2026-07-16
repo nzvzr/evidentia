@@ -42,12 +42,14 @@ import pytest
 from sqlalchemy import select
 
 from app.core import security
+from app.core.config import get_settings
 from app.models.db_models import (
     JOB_STATE_QUEUED,
     JOB_STATE_RUNNING,
     Company,
     CompanyMember,
     Document,
+    DocumentBlob,
     DocumentVersion,
     IngestionJob,
     RefreshToken,
@@ -873,3 +875,115 @@ def test_concurrent_enqueue_leaves_exactly_one_live_job_on_postgres(session_fact
         assert [job.id for job in live] == [resolved_ids[0]]
     finally:
         check.close()
+
+
+# ==========================================================================
+# Flag-on JSON create quota boundaries under real row locks (review fix).
+# The JSON path shares the multipart path's company-row lock, so two creates
+# racing for the last quota slot must serialize: exactly one wins, the loser
+# gets the typed quota code, and nothing the loser touched persists.
+# ==========================================================================
+
+
+def _race_two_json_creates(alice) -> List[tuple]:
+    """Fire two concurrent flag-on JSON creates as the same tenant; return
+    [(status_code, body), ...] in completion order."""
+    results: List[tuple] = []
+    lock = threading.Lock()
+
+    def create(n: int) -> None:
+        res = alice.post(
+            "/api/documents",
+            json={
+                "title": f"Racer {n}",
+                "type": "MD",
+                "contentText": f"## R{n}\n" + "x" * 34,  # 40 UTF-8 bytes exactly
+            },
+        )
+        with lock:
+            results.append((res.status_code, res.json()))
+
+    errors = run_concurrently([lambda: create(1), lambda: create(2)])
+    assert errors == [], f"worker raised: {errors}"
+    assert len(results) == 2
+    return results
+
+
+def _tenant_ingestion_rows(session_factory, company_id: str) -> dict:
+    check = session_factory()
+    try:
+        return {
+            "documents": len(
+                check.execute(
+                    select(Document).where(Document.company_id == company_id)
+                ).scalars().all()
+            ),
+            "versions": len(
+                check.execute(
+                    select(DocumentVersion).where(DocumentVersion.company_id == company_id)
+                ).scalars().all()
+            ),
+            "blobs": len(
+                check.execute(
+                    select(DocumentBlob).where(DocumentBlob.company_id == company_id)
+                ).scalars().all()
+            ),
+            "jobs": len(
+                check.execute(
+                    select(IngestionJob).where(IngestionJob.company_id == company_id)
+                ).scalars().all()
+            ),
+            "stored_bytes": sum(
+                blob.byte_size
+                for blob in check.execute(
+                    select(DocumentBlob).where(DocumentBlob.company_id == company_id)
+                ).scalars().all()
+            ),
+        }
+    finally:
+        check.close()
+
+
+@requires_postgres
+def test_concurrent_json_creates_respect_the_count_quota_on_postgres(
+    client, alice, session_factory, monkeypatch
+):
+    """One document-count slot remains; two flag-on JSON creates race for it."""
+    monkeypatch.setattr(get_settings(), "evidentia_tenant_corpus_enabled", True)
+    monkeypatch.setattr(get_settings(), "evidentia_tenant_max_documents", 1)
+
+    results = _race_two_json_creates(alice)
+
+    codes = sorted(code for code, _ in results)
+    assert codes == [201, 403], f"expected exactly one winner, got {codes}"
+    loser = next(body for code, body in results if code == 403)
+    assert loser["code"] == "document_quota_exceeded"
+
+    rows = _tenant_ingestion_rows(session_factory, alice.company_id)
+    assert rows["documents"] == 1, "the persisted count exceeded the quota"
+    assert rows["versions"] == 1 and rows["blobs"] == 1 and rows["jobs"] == 1, (
+        "the losing create left rows behind"
+    )
+
+
+@requires_postgres
+def test_concurrent_json_creates_respect_the_byte_quota_on_postgres(
+    client, alice, session_factory, monkeypatch
+):
+    """Storage allows exactly one 40-byte payload; two flag-on JSON creates race."""
+    monkeypatch.setattr(get_settings(), "evidentia_tenant_corpus_enabled", True)
+    monkeypatch.setattr(get_settings(), "evidentia_tenant_max_documents", 100)
+    monkeypatch.setattr(get_settings(), "evidentia_tenant_max_total_bytes", 60)
+
+    results = _race_two_json_creates(alice)  # each payload is 40 bytes
+
+    codes = sorted(code for code, _ in results)
+    assert codes == [201, 403], f"expected exactly one winner, got {codes}"
+    loser = next(body for code, body in results if code == 403)
+    assert loser["code"] == "storage_quota_exceeded"
+
+    rows = _tenant_ingestion_rows(session_factory, alice.company_id)
+    assert rows["stored_bytes"] <= 60, "persisted bytes exceeded the storage quota"
+    assert rows["documents"] == 1 and rows["versions"] == 1 and rows["blobs"] == 1, (
+        "the losing create left rows behind"
+    )

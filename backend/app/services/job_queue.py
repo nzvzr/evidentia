@@ -1,32 +1,55 @@
-"""JobQueue — the seam ingestion work rides through (M1).
+"""JobQueue — the seam ingestion work rides through (M1 enqueue + M2 worker ops).
 
 Mirrors the `RateLimitStore` / `BlobStore` precedent: a Protocol with a
 DB-table-backed single-instance implementation now, a shared queue (Redis/RQ)
 later with zero call-site changes. Durability, retry accounting and
 observability come from the `ingestion_jobs` table, not from the process.
 
-M1 ships only the enqueue half — the worker that claims and executes jobs is
-the M2 milestone, and its binding requirements are recorded on the
-`IngestionJob` model: tenant-fair claiming (round-robin across tenants, never
-pure FIFO), `attempts` incremented at claim time (a poison job that kills the
-worker must still hit the cap), and a startup sweep that requeues stale
-`running` rows via `heartbeat_at`. The Protocol will grow those methods
-additively in M2; consumers written against it today never change.
+M2 adds the worker half, with the binding requirements recorded on the
+`IngestionJob` model:
+
+* **Tenant-fair claiming** — the claim considers one candidate per tenant (the
+  tenant's oldest queued job) and serves tenants round-robin, so one tenant
+  bulk-uploading hundreds of documents cannot starve another tenant's single
+  upload. Never pure FIFO.
+* **Claim-time attempt increment** — a poison job that kills the worker
+  process outright must still hit the attempts cap instead of being requeued
+  forever by the stale sweep.
+* **Ownership transitions are atomic conditional UPDATEs** (``WHERE state =
+  <expected>``): two workers racing for one job get exactly one winner on both
+  PostgreSQL (row lock on UPDATE) and SQLite (single-writer lock), with no
+  check-then-write window. Completed/terminally-failed jobs can never be
+  reclaimed because every transition re-checks the current state.
+* **Stale recovery** — `running` rows whose heartbeat is older than the
+  threshold are requeued (attempts below the cap) or terminally failed
+  (at the cap). Runs at worker startup and periodically.
 """
 
 from __future__ import annotations
 
-from typing import Optional, Protocol
+from datetime import datetime, timedelta
+from typing import List, Optional, Protocol, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.db_models import JOB_STATE_QUEUED, JOB_STATE_RUNNING, IngestionJob
+from app.models.db_models import (
+    JOB_STATE_FAILED,
+    JOB_STATE_QUEUED,
+    JOB_STATE_RUNNING,
+    JOB_STATE_SUCCEEDED,
+    IngestionJob,
+)
+
+# Bounded, user-safe job error text (full tracebacks belong in server logs).
+_MAX_JOB_ERROR_CHARS = 500
 
 
 class JobQueue(Protocol):
-    """Enqueue seam for ingestion jobs. Callers own the transaction."""
+    """Queue seam for ingestion jobs. Callers own the transaction: every
+    method flushes but never commits, so the caller decides the commit point
+    (the worker commits a claim immediately to make ownership durable)."""
 
     def enqueue(self, db: Session, *, company_id: str, document_id: str, version_id: str) -> IngestionJob:  # pragma: no cover
         """Queue ingestion work for a document version and return the job row.
@@ -36,18 +59,56 @@ class JobQueue(Protocol):
         """
         ...
 
+    def claim(self, db: Session, *, now: Optional[datetime] = None) -> Optional[IngestionJob]:  # pragma: no cover
+        """Atomically claim the next queued job (tenant-fair), moving it
+        queued -> running and incrementing `attempts`. None when idle."""
+        ...
+
+    def heartbeat(self, db: Session, job_id: str, *, now: Optional[datetime] = None) -> bool:  # pragma: no cover
+        """Refresh the running job's liveness. False when the job is no longer
+        running (ownership lost — the holder must stop working on it)."""
+        ...
+
+    def complete(self, db: Session, job_id: str) -> bool:  # pragma: no cover
+        """running -> succeeded. False when the job was not running."""
+        ...
+
+    def fail(
+        self, db: Session, job_id: str, *, error: str, retryable: bool, max_attempts: int
+    ) -> str:  # pragma: no cover
+        """running -> queued (retryable, attempts below cap) or failed.
+        Returns the resulting state."""
+        ...
+
+    def recover_stale(
+        self, db: Session, *, stale_before: datetime, max_attempts: int, now: Optional[datetime] = None
+    ) -> List[IngestionJob]:  # pragma: no cover
+        """Requeue (or terminally fail, at the attempts cap) `running` jobs
+        whose heartbeat predates `stale_before`. Returns the touched rows."""
+        ...
+
 
 class DatabaseJobQueue:
     """v1 implementation: one `ingestion_jobs` row per unit of work.
 
-    Idempotency is enforced at two levels. The pre-select handles the common
-    repeat call cheaply; the partial unique index
+    Enqueue idempotency is enforced at two levels. The pre-select handles the
+    common repeat call cheaply; the partial unique index
     `uq_ingestion_jobs_live_version` (one row per version while queued/running)
     is the authority when two sessions race past the pre-select. The insert
     runs inside a SAVEPOINT so a losing racer's IntegrityError rolls back only
     the job insert — never the caller's outer transaction — and the loser then
     re-selects and returns the surviving live job.
+
+    The round-robin cursor (`_rr_cursor`) is in-process state, consistent with
+    the documented single-instance posture: it orders *which tenant is served
+    next* and resets on restart, while correctness (single ownership, attempt
+    accounting) never depends on it.
     """
+
+    def __init__(self) -> None:
+        self._rr_cursor: str = ""
+
+    # -- enqueue (M1) -------------------------------------------------------- #
 
     def _live_job(self, db: Session, company_id: str, version_id: str) -> Optional[IngestionJob]:
         return db.execute(
@@ -82,6 +143,154 @@ class DatabaseJobQueue:
                 raise
             return survivor
         return job
+
+    # -- claim (M2) ----------------------------------------------------------- #
+
+    def _queued_candidates(self, db: Session) -> List[Tuple[str, str]]:
+        """One candidate per tenant: (company_id, job_id of that tenant's
+        oldest queued job — created_at then id for a total, deterministic
+        order)."""
+        rows = db.execute(
+            select(
+                IngestionJob.company_id,
+                IngestionJob.id,
+                IngestionJob.created_at,
+            )
+            .where(IngestionJob.state == JOB_STATE_QUEUED)
+            .order_by(IngestionJob.created_at.asc(), IngestionJob.id.asc())
+        ).all()
+        oldest_per_company: dict[str, str] = {}
+        for company_id, job_id, _created in rows:
+            oldest_per_company.setdefault(company_id, job_id)
+        return sorted(oldest_per_company.items())
+
+    def claim(self, db: Session, *, now: Optional[datetime] = None) -> Optional[IngestionJob]:
+        now = now or datetime.utcnow()
+        candidates = self._queued_candidates(db)
+        if not candidates:
+            return None
+
+        # Round-robin: serve the first tenant strictly after the cursor in the
+        # stable company ordering, wrapping — so tenant A's bulk backlog and
+        # tenant B's single job alternate instead of A monopolizing workers.
+        after = [c for c in candidates if c[0] > self._rr_cursor]
+        ordered = after + [c for c in candidates if c[0] <= self._rr_cursor]
+
+        for company_id, job_id in ordered:
+            claimed = db.execute(
+                update(IngestionJob)
+                .where(IngestionJob.id == job_id, IngestionJob.state == JOB_STATE_QUEUED)
+                .values(
+                    state=JOB_STATE_RUNNING,
+                    attempts=IngestionJob.attempts + 1,  # claim-time increment
+                    heartbeat_at=now,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount == 1:
+                self._rr_cursor = company_id
+                db.flush()
+                return db.execute(
+                    select(IngestionJob)
+                    .where(IngestionJob.id == job_id)
+                    .execution_options(populate_existing=True)
+                ).scalar_one()
+            # Another worker won this row; try the next tenant's candidate.
+        return None
+
+    # -- running-job lifecycle (M2) ------------------------------------------ #
+
+    def heartbeat(self, db: Session, job_id: str, *, now: Optional[datetime] = None) -> bool:
+        now = now or datetime.utcnow()
+        result = db.execute(
+            update(IngestionJob)
+            .where(IngestionJob.id == job_id, IngestionJob.state == JOB_STATE_RUNNING)
+            .values(heartbeat_at=now, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount == 1
+
+    def complete(self, db: Session, job_id: str) -> bool:
+        now = datetime.utcnow()
+        result = db.execute(
+            update(IngestionJob)
+            .where(IngestionJob.id == job_id, IngestionJob.state == JOB_STATE_RUNNING)
+            .values(state=JOB_STATE_SUCCEEDED, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount == 1
+
+    def fail(
+        self, db: Session, job_id: str, *, error: str, retryable: bool, max_attempts: int
+    ) -> str:
+        now = datetime.utcnow()
+        job = db.execute(
+            select(IngestionJob)
+            .where(IngestionJob.id == job_id)
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if job is None or job.state != JOB_STATE_RUNNING:
+            return job.state if job is not None else JOB_STATE_FAILED
+
+        next_state = (
+            JOB_STATE_QUEUED if retryable and job.attempts < max_attempts else JOB_STATE_FAILED
+        )
+        result = db.execute(
+            update(IngestionJob)
+            .where(IngestionJob.id == job_id, IngestionJob.state == JOB_STATE_RUNNING)
+            .values(
+                state=next_state,
+                last_error=(error or "")[:_MAX_JOB_ERROR_CHARS],
+                heartbeat_at=None,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        db.flush()
+        return next_state if result.rowcount == 1 else JOB_STATE_FAILED
+
+    def recover_stale(
+        self,
+        db: Session,
+        *,
+        stale_before: datetime,
+        max_attempts: int,
+        now: Optional[datetime] = None,
+    ) -> List[IngestionJob]:
+        now = now or datetime.utcnow()
+        stale = db.execute(
+            select(IngestionJob)
+            .where(
+                IngestionJob.state == JOB_STATE_RUNNING,
+                IngestionJob.heartbeat_at.isnot(None),
+                IngestionJob.heartbeat_at < stale_before,
+            )
+            .execution_options(populate_existing=True)
+        ).scalars().all()
+
+        touched: List[IngestionJob] = []
+        for job in stale:
+            # Attempts were already incremented when the dead holder claimed
+            # the job, so the cap check needs no further increment here.
+            next_state = JOB_STATE_QUEUED if job.attempts < max_attempts else JOB_STATE_FAILED
+            values = {
+                "state": next_state,
+                "heartbeat_at": None,
+                "updated_at": now,
+            }
+            if next_state == JOB_STATE_FAILED:
+                values["last_error"] = "stale_abandoned: worker stopped heartbeating"
+            result = db.execute(
+                update(IngestionJob)
+                .where(IngestionJob.id == job.id, IngestionJob.state == JOB_STATE_RUNNING)
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+            if result.rowcount == 1:
+                touched.append(job)
+        db.flush()
+        return touched
 
 
 def get_job_queue() -> JobQueue:

@@ -657,3 +657,125 @@ guarantees one request per logical run within one tab/mount lifecycle. It does
 **not** deduplicate across browser tabs, after navigating back to `/running`, or
 against server-side replay. True end-to-end idempotency (e.g. a backend-honored
 `Idempotency-Key`) belongs to a later backend/API milestone.
+
+## 2026-07-16 — M2 implementation decisions (MD/TXT upload + ingestion spine)
+
+M2 implemented per the roadmap (multipart upload, validation/caps/dedupe/
+quotas/rate limits, DatabaseJobQueue worker operations, in-process worker,
+MD/TXT parsers → DocIR v1 → sectionizer, atomic persistence, documents UI).
+Five implementation-level decisions made where the design left latitude:
+
+**Transitional section identity — the M3 anchor algorithm is NOT pre-empted.**
+`document_sections.anchor_id`/`citation_id` are NOT NULL, but the heading-path
+anchor algorithm is a frozen-forever M3 surface (versioned constants, golden
+fixtures, tie-breaking) that M2 must not freeze by accident. M2 therefore
+writes ordinal-based *internal* identifiers (`s0007` / `pre-m3:s0007`) and
+stamps `anchor_algo_version = "pre-m3-transitional"` on every version it
+completes. These ids are never exposed through any API, UI or report:
+generation cannot read tenant sections until M4, which depends on M3, so no
+public citation identity exists yet. M3 re-anchors `pre-m3-transitional`
+versions through the same defined re-processing trigger as a parser upgrade —
+no report-frozen id can be affected because none has been minted.
+
+**`ready` in M2 means "parsed and sectionized", and M2 does flip
+`current_version_id`.** The design (§1 step 8) makes the flip part of
+ingestion completion, and the M1 rule (single controlled flip site, only ever
+to a `ready` version) is enforced in exactly one function
+(`pipeline._flip_current_version`). The pre-M3 meaning is machine-readable via
+the transitional `anchor_algo_version`, and the UI words it honestly
+("Processed … not yet used for report generation"). The `classifying` state is
+reserved for M3 and never entered in M2.
+
+**JSON document creation routes through the ingestion spine only when the
+corpus flag is on.** With the flag off, `POST /api/documents` stays
+byte-for-byte the pre-M2 behavior (response key set is test-pinned). With the
+flag on it additionally synthesizes version 1 + blob + queued job (the
+backfill shape), which is the §9 "existing JSON create routed through the same
+pipeline" requirement without any silent behavior change for existing callers.
+
+**Duplicate/retry semantics on the version level.** Tenant-scoped dedupe keys
+on the actual uploaded bytes (`documents.content_sha256`); an identical
+new-document upload returns the existing document explicitly (200,
+`duplicate: true`) and stores nothing. A byte-identical new *version* is an
+explicit no-op (200, `noop: true`) — except when the latest version FAILED, in
+which case the same bytes are a retry: the immutable version row and blob are
+reused and only a new job is enqueued. Cross-tenant dedupe deliberately does
+not exist (identical bytes in two tenants are two blobs) — blob-level physical
+dedupe would be a cross-tenant information channel and was not approved.
+
+**Soft delete stays deferred.** `DELETE /api/documents/{id}` remains the hard,
+cascading delete (versions/blobs/sections/jobs go with the document, verified
+by the M1 FK-cascade test). The §3 soft-delete semantics exist to keep
+"view source" resolvable for persisted reports — impossible before M4 reports
+cite tenant sections — so wiring it now would change existing API behavior for
+no reachable benefit. Lands with the versioning UX milestone.
+
+Also recorded: the sectionizer's documented bounds (200 min-fragment /
+4,000 max / 1,200-char excerpt) are M2 sectionizer behavior
+(`SECTIONIZER_VERSION = m2.1`), not yet the frozen M3 anchor-algorithm
+constants; `alembic check` reports pre-existing nullable drift on four legacy
+auth-table timestamp columns (`company_members.updated_at`,
+`refresh_tokens/email_verification_tokens/password_reset_tokens.created_at`) —
+present on main before M2, untouched by M2 (no model or migration changed),
+zero drift on ingestion tables. Public report schema unchanged; report
+generation still reads only the demo corpus (verified by test and smoke).
+
+## 2026-07-16 — M2 independent review remediation (lifecycle contract pinned + JSON create abuse bounds)
+
+The complete M2 diff was independently reviewed: **approve with fixes**, no
+commit blockers. Two fixes applied; two findings deliberately deferred and
+recorded as debt (see PROJECT_STATE "Deferred debt").
+
+### Binding constraint — the M2→M3 version lifecycle contract
+
+This is a **binding architecture constraint**: an explicit **M3 entry
+criterion** and an explicit **M4 TenantCorpusProvider invariant**. It pins how
+the transitional M2 identity is retired, so that "immutable versions" survives
+the M3 re-anchoring rather than being quietly violated by it.
+
+1. **M2-ready versions stamped `anchor_algo_version = "pre-m3-transitional"`
+   are immutable.** M3 must never mutate the ready `document_versions` row,
+   its existing `document_sections`, its transitional `anchor_id` values, its
+   transitional `citation_id` values, or its `manifest_sha256`.
+2. **M3 finalization happens by re-ingestion into a NEW `document_versions`
+   row**, re-processed from the retained source blob — the same defined
+   trigger shape as a parser upgrade. The old M2-ready version and every one
+   of its sections must remain **byte-for-byte unchanged** after M3
+   re-ingestion.
+3. **The new version receives**: the final versioned anchor algorithm, final
+   internal citation identities, deterministic classification, a new manifest,
+   `ready` status, and the controlled single-site `current_version_id` flip.
+4. **M4's TenantCorpusProvider must explicitly reject/filter any version whose
+   `anchor_algo_version == "pre-m3-transitional"` — even if
+   `current_version_id` points to it.** `status == "ready"` alone is NOT
+   sufficient evidence of generation eligibility; eligibility requires a
+   final (non-transitional) anchor algorithm version. Rationale: `ready` in M2
+   means only "parsed and sectionized", and a tenant who uploaded documents in
+   M2 but never triggers re-ingestion would otherwise have transitional,
+   never-frozen ids minted into persisted reports.
+
+Nothing about the current M2 state machine or `current_version_id` behavior
+changes now; the contract constrains *future* M3/M4 code only.
+
+### Fix — flag-on JSON create shares the multipart abuse bounds
+
+The review found that with `EVIDENTIA_TENANT_CORPUS_ENABLED=true`, the legacy
+JSON `POST /api/documents` routed through the ingestion spine (version 1 +
+blob + queued job) while bypassing every abuse bound the multipart path pays:
+upload rate limits, the tenant document-count quota, the stored-byte quota,
+and the company-row lock — a quota bypass reachable by any authenticated
+member the moment the flag turns on.
+
+The flag-on JSON path now goes through
+`document_upload.create_json_document`, which reuses the *same* internals as
+multipart (`enforce_upload` first — counted before any row is touched — then
+`_lock_company`, then `_enforce_quotas_locked` on the **actual UTF-8 byte
+size** of `contentText`, then document + version + blob + job in **one
+transaction**). Same typed codes (`rate_limited`, `document_quota_exceeded`,
+`storage_quota_exceeded`); a rejection leaves no document, version, blob or
+job. There is deliberately **no second quota policy** — the JSON path calls
+the multipart helpers, it does not reimplement them. The flag-off JSON path
+is untouched (byte-for-byte pre-M2, still test-pinned; no new rate/quota
+semantics were introduced to disabled mode). Verified by 7 new API tests plus
+two PostgreSQL two-writer boundary races (count-quota and byte-quota: exactly
+one winner, typed loser, persisted rows/bytes within quota).

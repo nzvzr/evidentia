@@ -163,6 +163,25 @@ def _startup() -> None:
         except Exception as exc:  # noqa: BLE001 - never block startup on DB
             logger.warning("Database initialization skipped: %s", exc)
 
+    # M2 ingestion worker: started ONLY when the tenant-corpus flag and the
+    # database are both enabled. Flag off (the default) = no worker exists and
+    # queued tenant jobs are not processed. start_application_worker() is
+    # idempotent, so dev-reload and repeated test lifespans never stack pools.
+    if settings.evidentia_tenant_corpus_enabled and settings.is_db_enabled():
+        try:
+            from app.ingestion.worker import start_application_worker
+
+            start_application_worker()
+        except Exception as exc:  # noqa: BLE001 - the API must still serve
+            logger.error("Ingestion worker failed to start: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    from app.ingestion.worker import stop_application_worker
+
+    stop_application_worker()
+
 
 @app.get("/health")
 def health():

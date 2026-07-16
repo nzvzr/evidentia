@@ -5,8 +5,14 @@ import AppShell from "@/components/AppShell";
 import { DEMO_DOCS } from "@/lib/demoDocs";
 import { RISKS } from "@/lib/demoReport";
 import { PERSONAS } from "@/lib/personas";
-import { useUploads } from "@/lib/uploads";
-import type { DemoDoc, UploadedDoc } from "@/lib/types";
+import {
+  isProcessing,
+  sizeLabel,
+  toLegacyUploadedDoc,
+  useTenantDocuments,
+  type TenantDocument,
+} from "@/lib/tenantDocuments";
+import type { DemoDoc } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -40,25 +46,55 @@ function fromDemo(doc: DemoDoc): DocDetail {
   };
 }
 
-function fromUpload(doc: UploadedDoc): DocDetail {
-  return {
-    title: doc.name,
-    kind: doc.kind,
-    category: doc.category,
-    description: "Session upload processed locally in your browser.",
-    citationIds: [],
-    excerpt: doc.excerpt,
-    personas: [],
-    topics: [],
-    relatedRisks: [],
-  };
+/** Honest processing-state label for a tenant document (real backend state). */
+function stageLabel(doc: TenantDocument): string {
+  switch (doc.ingestion?.stage) {
+    case "pending":
+      return "Queued";
+    case "extracting":
+      return "Extracting";
+    case "sectioning":
+      return "Sectioning";
+    case "ready":
+      return "Processed";
+    case "failed":
+      return "Failed";
+    default:
+      return doc.ingestion?.status === "processing" ? "Processing" : "Stored";
+  }
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
 }
 
 export default function DocumentsPage() {
-  const { uploads, hydrated, addFile, remove } = useUploads();
+  const {
+    documents,
+    corpus,
+    corpusEnabled,
+    hydrated,
+    uploading,
+    uploadFile,
+    uploadNewVersion,
+    retry,
+    addLegacyFile,
+    remove,
+  } = useTenantDocuments();
+
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const versionFileRef = useRef<HTMLInputElement>(null);
+  const versionTargetRef = useRef<string | null>(null);
+
+  const legacyUploads = useMemo(() => documents.map(toLegacyUploadedDoc), [documents]);
 
   const stats = useMemo(() => {
     const anchors = DEMO_DOCS.reduce((a, d) => a + d.citationIds.length, 0);
@@ -67,21 +103,84 @@ export default function DocumentsPage() {
       passages: "1,284",
       anchors,
       personas: PERSONAS.length,
-      uploads: uploads.length,
+      uploads: documents.length,
     };
-  }, [uploads.length]);
+  }, [documents.length]);
+
+  const maxSizeLabel = corpus?.maxFileBytes ? sizeLabel(corpus.maxFileBytes) : "2.0 MB";
+
+  const validSelection = (file: File): boolean => {
+    if (!/\.(txt|md)$/i.test(file.name)) {
+      setUploadError(
+        corpusEnabled
+          ? "Only .md and .txt files are supported."
+          : "Only .txt and .md files are supported in demo mode.",
+      );
+      return false;
+    }
+    return true;
+  };
 
   const onFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadError(null);
-    for (const file of Array.from(files)) {
-      if (!/\.(txt|md)$/i.test(file.name)) {
-        setUploadError("Only .txt and .md files are supported in demo mode.");
-        continue;
+    setUploadNotice(null);
+
+    if (corpusEnabled) {
+      // M2 accepts one file per request.
+      const file = files[0];
+      if (files.length > 1) {
+        setUploadError("Upload one file at a time.");
+        return;
       }
-      await addFile(file);
+      if (!validSelection(file)) return;
+      const result = await uploadFile(file);
+      if (!result.ok) {
+        setUploadError(result.error ?? "Upload failed.");
+      } else if (result.duplicate) {
+        setUploadNotice("Already in your library — nothing new was stored.");
+      } else if (result.noop) {
+        setUploadNotice("Identical to the current version — no new version was created.");
+      } else {
+        setUploadNotice("Upload accepted — processing has started.");
+      }
+    } else {
+      for (const file of Array.from(files)) {
+        if (!validSelection(file)) continue;
+        const result = await addLegacyFile(file);
+        if (!result.ok) setUploadError(result.error ?? "Upload failed.");
+      }
     }
     if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const onVersionFile = async (files: FileList | null) => {
+    const targetId = versionTargetRef.current;
+    versionTargetRef.current = null;
+    if (!files || files.length === 0 || !targetId) return;
+    setUploadError(null);
+    setUploadNotice(null);
+    const file = files[0];
+    if (!validSelection(file)) return;
+    const result = await uploadNewVersion(targetId, file);
+    if (!result.ok) {
+      setUploadError(result.error ?? "Upload failed.");
+    } else if (result.noop) {
+      setUploadNotice("Identical to the current version — no new version was created.");
+    } else if (result.retried) {
+      setUploadNotice("Retrying the failed version with the same content.");
+    } else {
+      setUploadNotice("New version accepted — processing has started.");
+    }
+    if (versionFileRef.current) versionFileRef.current.value = "";
+  };
+
+  const onRetry = async (documentId: string) => {
+    setUploadError(null);
+    setUploadNotice(null);
+    const result = await retry(documentId);
+    if (!result.ok) setUploadError(result.error ?? "Retry failed.");
+    else setUploadNotice("Retry started.");
   };
 
   return (
@@ -93,15 +192,24 @@ export default function DocumentsPage() {
           <span style={{ color: "var(--line2)" }}>/</span>
           <span style={{ fontSize: 13.5, color: "var(--sub)" }}>Corpus</span>
         </div>
-        <button onClick={() => fileRef.current?.click()} style={primaryBtn}>
-          <span style={{ fontSize: 15, lineHeight: 1, fontWeight: 400 }}>+</span> Upload documents
+        <button onClick={() => fileRef.current?.click()} style={primaryBtn} disabled={uploading}>
+          <span style={{ fontSize: 15, lineHeight: 1, fontWeight: 400 }}>+</span>
+          {uploading ? "Uploading…" : corpusEnabled ? "Upload document" : "Upload documents"}
         </button>
         <input
           ref={fileRef}
           type="file"
           accept=".txt,.md,text/plain,text/markdown"
-          multiple
+          multiple={!corpusEnabled}
           onChange={(e) => onFiles(e.target.files)}
+          style={{ display: "none" }}
+        />
+        <input
+          ref={versionFileRef}
+          type="file"
+          accept=".txt,.md,text/plain,text/markdown"
+          aria-label="New version file"
+          onChange={(e) => onVersionFile(e.target.files)}
           style={{ display: "none" }}
         />
       </div>
@@ -120,11 +228,21 @@ export default function DocumentsPage() {
           <Stat k="Passages available" v={stats.passages} />
           <Stat k="Citation anchors" v={String(stats.anchors)} />
           <Stat k="Personas supported" v={String(stats.personas)} />
-          <Stat k="Session uploads" v={hydrated ? String(stats.uploads) : "—"} accent />
+          <Stat
+            k={corpusEnabled ? "Your documents" : "Session uploads"}
+            v={hydrated ? String(stats.uploads) : "—"}
+            accent
+          />
         </div>
 
-        {/* A. Demo corpus */}
-        <SectionLabel top>DEMO CORPUS</SectionLabel>
+        {/* A. Demo / sample corpus — clearly labelled, never tenant content */}
+        <SectionLabel top>{corpusEnabled ? "SAMPLE CORPUS (DEMO)" : "DEMO CORPUS"}</SectionLabel>
+        {corpusEnabled && (
+          <p style={{ fontSize: 12.5, color: "var(--sub)", margin: "0 0 12px", lineHeight: 1.5 }}>
+            Sample documents provided by Evidentia — not your uploaded content. Report generation
+            uses this sample corpus until tenant document analysis is enabled.
+          </p>
+        )}
         <div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", background: "var(--panel)" }}>
           {DEMO_DOCS.map((doc, i) => (
             <button
@@ -136,7 +254,7 @@ export default function DocumentsPage() {
                 <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{doc.name}</span>
                   <span style={kindBadge}>{doc.kind}</span>
-                  <span style={statusBadge}>{doc.status}</span>
+                  <span style={statusBadge}>{corpusEnabled ? "Sample" : doc.status}</span>
                 </span>
                 <span style={{ display: "block", fontFamily: mono, fontSize: 11, color: "var(--sub)", marginTop: 5 }}>
                   {doc.category} · {doc.pages} · updated {doc.updatedAt}
@@ -157,8 +275,8 @@ export default function DocumentsPage() {
           ))}
         </div>
 
-        {/* B. Session uploads */}
-        <SectionLabel top>SESSION UPLOADS</SectionLabel>
+        {/* B. Tenant documents / session uploads */}
+        <SectionLabel top>{corpusEnabled ? "YOUR DOCUMENTS" : "SESSION UPLOADS"}</SectionLabel>
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -167,21 +285,105 @@ export default function DocumentsPage() {
           }}
           style={dropZone}
         >
-          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>Upload .txt or .md documents</div>
-          <div style={{ fontSize: 12.5, color: "var(--sub)", marginTop: 6, lineHeight: 1.5 }}>
-            Drag &amp; drop here, or{" "}
-            <button onClick={() => fileRef.current?.click()} style={inlineLink}>browse files</button>. Processed locally — never uploaded.
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+            {corpusEnabled ? "Upload a .md or .txt document" : "Upload .txt or .md documents"}
           </div>
+          <div style={{ fontSize: 12.5, color: "var(--sub)", marginTop: 6, lineHeight: 1.5 }}>
+            {corpusEnabled ? (
+              <>
+                Markdown (.md) and plain text (.txt), up to {maxSizeLabel}, one file per upload.
+                Drag &amp; drop here, or{" "}
+                <button onClick={() => fileRef.current?.click()} style={inlineLink}>browse files</button>.
+              </>
+            ) : (
+              <>
+                Drag &amp; drop here, or{" "}
+                <button onClick={() => fileRef.current?.click()} style={inlineLink}>browse files</button>. Processed locally — never uploaded.
+              </>
+            )}
+          </div>
+          {uploading && (
+            <div style={{ fontSize: 12.5, color: "var(--accent)", marginTop: 8 }}>Uploading…</div>
+          )}
           {uploadError && (
             <div style={{ fontSize: 12.5, color: "var(--risk, #c34635)", marginTop: 8 }}>{uploadError}</div>
           )}
+          {uploadNotice && (
+            <div style={{ fontSize: 12.5, color: "var(--accent)", marginTop: 8 }}>{uploadNotice}</div>
+          )}
         </div>
 
-        {hydrated && uploads.length > 0 && (
+        {hydrated && documents.length > 0 && corpusEnabled && (
           <div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", background: "var(--panel)", marginTop: 14 }}>
-            {uploads.map((doc, i) => (
-              <div key={doc.id} style={{ ...docRow, cursor: "default", borderBottom: i < uploads.length - 1 ? "1px solid var(--line)" : "none" }}>
-                <button onClick={() => setDetail(fromUpload(doc))} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", font: "inherit", cursor: "pointer", padding: 0 }}>
+            {documents.map((doc, i) => {
+              const ing = doc.ingestion;
+              const label = stageLabel(doc);
+              const processing = isProcessing(doc);
+              const failed = ing?.stage === "failed";
+              return (
+                <div key={doc.id} style={{ ...docRow, cursor: "default", borderBottom: i < documents.length - 1 ? "1px solid var(--line)" : "none" }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{doc.title}</span>
+                      {doc.type && <span style={kindBadge}>{doc.type}</span>}
+                      <span
+                        style={failed ? failedBadge : processing ? processingBadge : statusBadge}
+                        title={
+                          ing?.stage === "ready"
+                            ? "Parsed and split into sections. Not yet used for report generation."
+                            : undefined
+                        }
+                      >
+                        {label}
+                      </span>
+                    </span>
+                    <span style={{ display: "block", fontFamily: mono, fontSize: 11, color: "var(--sub)", marginTop: 5 }}>
+                      {[
+                        ing?.filename,
+                        ing?.byteSize != null ? sizeLabel(ing.byteSize) : null,
+                        doc.createdAt ? `uploaded ${formatDate(doc.createdAt)}` : null,
+                        ing?.versionNo != null ? `v${ing.versionNo}` : null,
+                        ing?.stage === "ready" && ing.sectionCount != null
+                          ? `${ing.sectionCount} sections`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    {failed && ing?.errorMessage && (
+                      <span style={{ display: "block", fontSize: 12, color: "var(--risk, #c34635)", marginTop: 6 }}>
+                        {ing.errorMessage}
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ display: "flex", gap: 8, flex: "none" }}>
+                    {failed && (
+                      <button onClick={() => onRetry(doc.id)} style={ghostBtn}>Retry</button>
+                    )}
+                    {!processing && (
+                      <button
+                        onClick={() => {
+                          versionTargetRef.current = doc.id;
+                          versionFileRef.current?.click();
+                        }}
+                        style={ghostBtn}
+                      >
+                        New version
+                      </button>
+                    )}
+                    <button onClick={() => remove(doc.id)} style={ghostBtn}>Remove</button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {hydrated && legacyUploads.length > 0 && !corpusEnabled && (
+          <div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", background: "var(--panel)", marginTop: 14 }}>
+            {legacyUploads.map((doc, i) => (
+              <div key={doc.id} style={{ ...docRow, cursor: "default", borderBottom: i < legacyUploads.length - 1 ? "1px solid var(--line)" : "none" }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{doc.name}</span>
                     <span style={kindBadge}>{doc.kind}</span>
@@ -190,7 +392,7 @@ export default function DocumentsPage() {
                   <span style={{ display: "block", fontFamily: mono, fontSize: 11, color: "var(--sub)", marginTop: 5 }}>
                     {doc.filename} · {doc.sizeLabel} · {doc.uploadedAt}
                   </span>
-                </button>
+                </span>
                 <button onClick={() => remove(doc.id)} style={ghostBtn}>Remove</button>
               </div>
             ))}
@@ -198,11 +400,24 @@ export default function DocumentsPage() {
         )}
 
         <div style={noteBox}>
-          <span style={{ fontFamily: mono, fontSize: 10.5, color: "var(--accent)", letterSpacing: ".08em", fontWeight: 600 }}>DEMO MODE</span>
-          <span style={{ fontSize: 13, color: "var(--ink2)" }}>
-            Uploaded files are previewed locally for this session only — they are not stored and are not analyzed by the
-            generation pipeline. Reports are generated from the curated demo corpus above.
-          </span>
+          {corpusEnabled ? (
+            <>
+              <span style={{ fontFamily: mono, fontSize: 10.5, color: "var(--accent)", letterSpacing: ".08em", fontWeight: 600 }}>DOCUMENT INGESTION</span>
+              <span style={{ fontSize: 13, color: "var(--ink2)" }}>
+                Uploaded documents are stored for your organization and parsed into sections.
+                Report generation still uses the sample corpus above; analysis of your own
+                documents arrives in a later release.
+              </span>
+            </>
+          ) : (
+            <>
+              <span style={{ fontFamily: mono, fontSize: 10.5, color: "var(--accent)", letterSpacing: ".08em", fontWeight: 600 }}>DEMO MODE</span>
+              <span style={{ fontSize: 13, color: "var(--ink2)" }}>
+                Uploaded files are previewed locally for this session only — they are not stored and are not analyzed by the
+                generation pipeline. Reports are generated from the curated demo corpus above.
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -387,6 +602,19 @@ const statusBadge: React.CSSProperties = {
   background: "var(--accent-weak)",
   padding: "3px 8px",
   borderRadius: 5,
+};
+
+const processingBadge: React.CSSProperties = {
+  ...statusBadge,
+  color: "var(--ink)",
+  background: "var(--shell)",
+  border: "1px solid var(--line2)",
+};
+
+const failedBadge: React.CSSProperties = {
+  ...statusBadge,
+  color: "#fff",
+  background: "#c34635",
 };
 
 const citeTag: React.CSSProperties = {
