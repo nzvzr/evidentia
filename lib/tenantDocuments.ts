@@ -29,6 +29,8 @@ export interface IngestionState {
   identity: string | null;
   /** M3: current version is final AND ready (citation-ready). */
   finalized: boolean;
+  /** Exact M3 predicate passed; safe to use for authenticated generation. */
+  generationEligible: boolean;
   versionNo: number | null;
   filename: string | null;
   detectedFormat: string | null;
@@ -52,6 +54,7 @@ export interface TenantDocument {
 
 export interface TenantCorpusConfig {
   enabled: boolean;
+  generationEnabled: boolean;
   acceptedExtensions: string[];
   maxFileBytes: number;
 }
@@ -95,6 +98,7 @@ function toIngestion(raw: Partial<IngestionState> | null | undefined): Ingestion
     stageKind: raw.stageKind != null ? String(raw.stageKind) : null,
     identity: raw.identity != null ? String(raw.identity) : null,
     finalized: Boolean(raw.finalized),
+    generationEligible: Boolean(raw.generationEligible),
     versionNo: typeof raw.versionNo === "number" ? raw.versionNo : null,
     filename: raw.filename != null ? String(raw.filename) : null,
     detectedFormat: raw.detectedFormat != null ? String(raw.detectedFormat) : null,
@@ -226,6 +230,7 @@ export function useTenantDocuments() {
         cfg && typeof cfg === "object"
           ? {
               enabled: Boolean(cfg.enabled),
+              generationEnabled: Boolean(cfg.generationEnabled),
               acceptedExtensions: Array.isArray(cfg.acceptedExtensions)
                 ? cfg.acceptedExtensions.map(String)
                 : [".md", ".txt"],

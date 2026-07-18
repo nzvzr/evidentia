@@ -23,6 +23,7 @@ interface MockDoc {
 
 const CORPUS_CONFIG = {
   enabled: true,
+  generationEnabled: true,
   acceptedExtensions: [".md", ".txt"],
   maxFileBytes: 2 * 1024 * 1024,
 };
@@ -323,7 +324,7 @@ describe("DocumentsPage", () => {
     await flush();
     const badge = screen.getByText("Awaiting finalization");
     expect(badge.getAttribute("title")).toMatch(/Finalize to compute stable citation identities/);
-    expect(screen.getByText(/Report generation still uses the sample corpus/)).toBeTruthy();
+    expect(screen.getByText(/Citation-ready documents are available to tenant report generation/)).toBeTruthy();
   });
 
   it("renders typed ingestion failures with a retry action", async () => {
@@ -547,6 +548,7 @@ describe("DocumentsPage", () => {
       ingestion: ingestion({
         stage: "ready", status: "ready", stageKind: "finalize",
         identity: "final", finalized: true, versionNo: 2, sectionCount: 3,
+        generationEligible: true,
       }),
     });
     listResponses = [
@@ -582,7 +584,7 @@ describe("DocumentsPage", () => {
     expect(screen.queryByText("Finalize")).toBeNull();
   });
 
-  it("distinguishes a citation-ready document without claiming generation use", async () => {
+  it("distinguishes a citation-ready document and reports tenant generation availability", async () => {
     listResponses = [
       {
         documents: [
@@ -590,6 +592,7 @@ describe("DocumentsPage", () => {
             ingestion: ingestion({
               stage: "ready", status: "ready", stageKind: "finalize",
               identity: "final", finalized: true, versionNo: 2, sectionCount: 3,
+              generationEligible: true,
             }),
           }),
         ],
@@ -599,10 +602,9 @@ describe("DocumentsPage", () => {
     renderStrict();
     await flush();
     const badge = screen.getByText("Citation-ready");
-    expect(badge.getAttribute("title")).toMatch(/still uses the sample corpus/);
+    expect(badge.getAttribute("title")).toMatch(/available for tenant generation/);
     expect(screen.queryByText("Finalize")).toBeNull();
-    // the generation note remains demo-only
-    expect(screen.getByText(/Report generation still uses the sample corpus/)).toBeTruthy();
+    expect(screen.getByText(/Citation-ready documents are available to tenant report generation/)).toBeTruthy();
   });
 
   it("labels a failed finalization distinctly and allows retry", async () => {

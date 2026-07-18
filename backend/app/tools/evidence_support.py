@@ -35,7 +35,9 @@ def market_is_regulated(market: str) -> bool:
 
 
 def _section_text(section: Section) -> str:
-    return f"{section['sectionTitle']} {section['excerpt']}".lower()
+    # M4 gate: deterministic support sees the full bounded canonical section.
+    # Excerpts remain display/prompt-budget material only.
+    return f"{section['sectionTitle']} {section.get('text', section['excerpt'])}".lower()
 
 
 def score_support(claim: Dict[str, Any], section: Section, persona_key: str, market: str) -> Dict[str, Any]:

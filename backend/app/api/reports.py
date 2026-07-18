@@ -57,6 +57,21 @@ def get_report(
     return _serialize(row)
 
 
+@router.get("/{report_id}/sources")
+def get_report_sources(
+    report_id: str,
+    ctx: CompanyContext = Depends(get_company_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Tenant-scoped audit projection; public report JSON remains unchanged."""
+    if not get_settings().is_db_enabled():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    data = reports_repo.get_report_sources(db, report_id, ctx.company_id)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return data
+
+
 @router.post("", status_code=status.HTTP_405_METHOD_NOT_ALLOWED)
 def create_report() -> Dict[str, Any]:
     """Removed. Reports are created **only** by authenticated generation.

@@ -1,118 +1,84 @@
 # Evidentia — Session Handoff
 
-_Keep under 100 lines. Rewrite for the current state after meaningful work._
-_Last updated: 2026-07-18 (M3 + four narrow corrections + final canonical
-anchor-grammar correction; diff uncommitted for last review)._
+_Last updated: 2026-07-18. Keep under 100 lines._
 
-## Where things stand
+## Status
 
-**M3 (stable anchors + internal citation identities + deterministic
-classification + M2→M3 finalization) is implemented; the seven-blocker review,
-the two-blocker focused review AND the final four narrow commit-blocking
-corrections are all CORRECTED and verified. The complete working-tree diff is
-deliberately UNCOMMITTED for one final review restricted to the four points
-below.** Nothing committed or pushed. No M4 functionality; generation remains
-demo-corpus-only; Settings untouched.
+M4 tenant-corpus report generation plus the narrow post-review hardening pass is
+implemented, verified and intentionally uncommitted for final micro-review.
+Start remained `main` at `b492eb0f7f5e0ca6c458e0555a07f317e620f947`; no
+branch, commit or push was made.
 
-Final four corrections (full text: `DECISIONS.md` 2026-07-18 round 3):
-- **Downgrade blob safety (a)**: a successor whose source version has ZERO
-  `document_blobs` rows now REFUSES the downgrade during preflight (was:
-  silently skipped → successor byte-unresolvable after lineage removal). Every
-  successor needs exactly one safely resolvable source blob — same lineage,
-  DB-backed data, size + `content_sha256` consistent; ambiguous/incomplete
-  refuse.
-- **Downgrade blob safety (b)**: successors that ALREADY own a blob are
-  preflighted, not excluded — accepted only as an exact safe equivalent of the
-  source binding (identical bytes/size/ownership; then idempotent), otherwise
-  refuse without overwriting/deleting. The whole plan is built globally before
-  any insert (early-valid + later-conflicting ⇒ zero rows written).
-- **Enforced downgrade() ordering**: `downgrade()` is exactly
-  `_preflight_downgrade` → `_materialize_successor_blobs` →
-  `_apply_m2_schema_downgrade`. Proven by calling the REAL `downgrade()` under
-  `Operations.context` with a sentinel-raising preflight + interception of both
-  phases, all `op.*` mutation entry points and all SQL (zero mutating
-  statements), plus success-path phase/SQL ordering and an AST supplement.
-- **Anchor-provenance decision semantics**: `validate_anchor_provenance` now
-  receives the row's CURRENT `anchor_id` and enforces the frozen matrix —
-  minted: no lineage/similarity; unchanged/heading-kept/reattached-exact:
-  `inheritedFrom` == current anchor (else `anchor_lineage_mismatch`);
-  inherited-exact: similarity EXACTLY 1.0; inherited-similar: finite
-  0.8 ≤ s ≤ 1.0 (frozen Jaccard threshold); split-lineage: anchor ==
-  `{parent}.p1`, part-free parent. Eligibility passes `row.anchor_id`;
-  manifest reconstruction is still required IN ADDITION (semantically valid
-  tampers fail `manifest_mismatch`). Goldens validate UNCHANGED (no manifest
-  identity change; `cft1` untouched).
-- **Canonical anchor grammar (final correction, incl. strictness pass)**: ONE
-  parser (`anchors.ANCHOR_GRAMMAR_RE` / `is_canonical_anchor` /
-  `_parse_anchor`) defines permanent-anchor structure everywhere — slug 12..31
-  lowercase ASCII base36, dup suffix >= 2 canonical decimal (no
-  `-0`/`-1`/leading zeros; first occurrence is the bare slug), part >= 1
-  canonical decimal. STRICT ASCII `[0-9]` classes (Python `\d` admitted
-  Unicode digits: `-2٢`→22, `.p1٢`→12) and `\A…\Z` + `fullmatch()` (bare `$`
-  admitted a trailing newline); the parser never strips/folds/repairs a
-  stored identifier. Malformed forms map to the never-matching sentinel;
-  split-lineage parses the parent BEFORE the relationship check;
-  eligibility's private `_FINAL_ANCHOR_RE` replaced by the shared predicate;
-  parametrized predicate/parser agreement test over the full corpus.
-  Generation already emitted only canonical forms — untouched;
-  `ANCHOR_ALGO_VERSION` unchanged; goldens byte-for-byte stable.
-  Verified: focused 249 passed; full SQLite **754 passed, 11 skipped**.
+Authenticated generation now always injects a company-scoped
+`TenantCorpusProvider`; anonymous demo generation remains exclusively the
+sample-backed TypeScript route. `EVIDENTIA_TENANT_GENERATION_ENABLED` defaults
+false. Tenant disabled/empty/ineligible/retrieval/evidence failures are typed and
+never fall back to demo.
 
-Earlier corrected surfaces remain as documented: 12-char `heading-path-v1`
-slugs (full-digest identity), `content-match-v1` inheritance,
-`CompleteFinalizationTarget` `cft1:<sha256>` pinned + registry-bound
-eligibility (`_check_target_binding` digest + type-sensitive deep equality),
-provenance hashed into manifest `m3.1`, citation prefix 8→12 with quota-wide
-candidates. Lifecycle: uploads still produce `pre-m3-transitional` versions;
-finalize re-ingests the retained blob into an immutable successor; the flip
-site never moves `current_version_id` backwards; source→successor integrity is
-DB-enforced (composite self-FK). M4 eligibility ships unconsumed, fails closed.
+## Implemented
 
-## Verification (all green, 2026-07-18 round 3)
+- Provider freezes exact eligible M3 current versions/sections via the existing
+  `check_generation_eligibility`; deleted, transitional, unsupported and malformed
+  sources fail closed. Full text is used internally; UI excerpts are bounded.
+- Deterministic `tenant-lexical-v1` retrieval has stable identity tie-breaks,
+  canonically streams and scores the complete frozen corpus before bounded
+  per-document top-k/global rank-round truncation, and retains configurable
+  document/candidate/selection/character/per-document/excerpt caps, ambiguous-
+  citation refusal and the `tcs1` corpus/config digest.
+- Existing orchestrator accepts the provider/company explicitly. Cache identity
+  includes tenant and snapshot. Tenant evidence is delimited untrusted prompt
+  material; embedded closing sentinels are case-insensitively HTML-encoded only
+  in the prompt representation. Exact structured citations remain frozen-registry
+  checked; narrative unknown-ID checks use active tenant + reserved demo families,
+  so ISO-27001, SOC-2 and PCI-DSS-4.0 are accepted. Stored text is unchanged.
+- Pipeline/orchestration failures return and persist `generation_failed`; actual
+  snapshot/completion persistence failures return `persistence_failed`, with safe
+  messages and honest failed report rows.
+- Migration `e4b7c9d2a610` adds report provenance metadata plus normalized
+  `report_source_versions` and `report_evidence_bindings`, composite tenant-safe
+  FKs/unique keys and indexes. Existing reports backfill as completed demo without
+  fake bindings. M4 downgrade restores exact M3 shape while retaining base rows.
+- Source audit is intentionally outside the unchanged 20-key public report JSON:
+  `GET /api/reports/{id}/sources`. Document deletion is soft so completed binding
+  provenance survives; deleted documents are excluded from new generations.
+- Next BFF forwards typed errors only to FastAPI. Running/Documents/report pages
+  label tenant/sample and eligibility honestly; report UI renders exact version,
+  section, citation, bounded excerpt and compact audit metadata. Old demo reports
+  remain readable.
 
-- All four blockers reproduced first (zero-blob `continue`; NOT-EXISTS successor
-  exclusion; helper-only ordering test; validator accepting sim 0.2/0.1 and
-  unrelated `inheritedFrom`).
-- Backend SQLite `python -m pytest tests -q`: **672 passed, 11 skipped**.
-  Focused: anchors+golden+manifest **124**, finalization **54**,
-  `test_m3_migration.py` **19** (SQLite).
-- PostgreSQL 16 (`postgresql+psycopg://…@127.0.0.1:54329/…`, container
-  `evidentia-pg-test`): migration suite both backends **37 passed**;
-  `test_concurrency.py` **23 passed**.
-- Migration refusal matrix (SQLite + PG): zero-source-blob, multiple/ambiguous
-  blobs (constraint dropped to seed corruption), corrupt size/storage-key/hash
-  metadata, NULL data, divergent pre-existing successor blob (kept untouched),
-  multiple/incomplete successor blobs, early-valid+later-conflicting global
-  planning — each leaves the complete M3 schema, revision, VARCHAR(12) prefix,
-  `operation`, M3 section columns and `source_version_id` intact, zero inserts;
-  equivalent pre-existing blob accepted idempotently; two-tenant round trip
-  preserves exact source bytes.
-- `alembic check` on fresh SQLite AND PostgreSQL 16 head DBs: only the 4
-  pre-existing legacy auth nullable drifts (zero new). `git diff --check` clean.
-- Frontend NOT re-run: no API response or type changed (previous run valid —
-  Documents 22/22, vitest 50/50, tsc/build clean). Goldens NOT regenerated
-  (all 17 fixtures' provenance validates semantically as-is).
-- Prior rounds' live PostgreSQL smoke + CLI checks remain valid (no runtime
-  surface of those flows changed in round 3).
+## Verification
 
-## Deferred debt (unchanged, do NOT fix before its milestone)
+- Focused post-review M4 + persistence SQLite: **30 passed**.
+- PostgreSQL 16 target (`evidentia-pg-test`): **197 passed**; complete backend:
+  **810 passed** in 524.32s.
+- Live PostgreSQL API/worker smoke: two companies uploaded/finalized real MD,
+  generated deterministic tenant reports, persisted 2 sources/2 bindings with
+  manifests/signatures and correct company ids. `ZORBLAX-999-A` and `-B` never
+  crossed; cross-tenant source audit was 404; empty=`tenant_corpus_empty`;
+  flag-off=`tenant_generation_disabled`.
+- Built Next production demo smoke: HTTP 200, `X-Evidentia-Demo: true`, 8 sample
+  citations, deterministic, both tenant markers absent.
+- Frontend: **55 passed** (4 files); ESLint **0 errors / 6 existing warnings**;
+  `tsc --noEmit` passed; production build passed.
+- Data-bearing M3→M4→M3→M4 migration cycle passed SQLite and PostgreSQL; hostile
+  cross-tenant FK insert rejected; base reports/documents retained.
+- Fresh SQLite/PostgreSQL head `alembic check`: exactly 4 known legacy auth
+  nullable differences, zero M4 drift.
+- Full SQLite backend: **780 passed, 11 skipped** in 268.1s.
 
-- **Worker complete/fail lease fencing** (M6/M7): M3 finalization stays far
-  below the 300s stale threshold; stage heartbeats + `OwnershipLost` abort are
-  the only hardenings. Full lease/epoch fencing before PDF/DOCX/OCR.
-- Flag-off legacy upload detail drawer (if trivial);
-  `documents.content_text` removal milestone; 4 legacy auth nullable drifts.
-- Blob retention must account for successors referencing the source version's
-  blob (`_load_source_bytes` fallback) when a keep-last-N policy arrives (M8+).
+## Review focus
 
-## Next steps
+1. Tenant provider query/limit behavior and report-local citation validator.
+2. Composite FK portability and intentional loss of M4-only provenance on an
+   operator-requested downgrade to exact M3.
+3. Separate audit endpoint/public-schema boundary and soft-delete retention.
+4. Feature-flag/no-fallback behavior across FastAPI and Next BFF.
 
-1. Final independent review of the uncommitted M3 diff, RESTRICTED to the four
-   round-3 corrections; then commit + push (only when explicitly requested).
-2. M4: TenantCorpusProvider consuming `generation_eligibility` (pass a Session;
-   transitional stays rejected even when current), orchestrator injection,
-   `reports.source_versions`/`engine_versions`, full-text scoring,
-   version-aware bounded cache, `report.company` behind the flag.
-3. Golden outputs change ONLY via the reviewed
-   `scripts/regenerate_golden_fixtures.py` — any diff there is a permanent
-   identity change and must be explained.
+## Deferred
+
+M4.1 performance only: optimize `GET /api/documents` eligibility calculation and
+consider immutable-key memoization or batched evaluation. No cache/eligibility
+redesign was made. F7 remains unchanged; F8 downgrade behavior remains unchanged.
+PDF/DOCX/OCR; embeddings/vector search; lease fencing; claims/CAD; external packs;
+blob retention/content_text removal; 4 legacy auth drifts; advanced selection and
+regeneration/version comparison remain deferred. M3 algorithms/goldens are unchanged.

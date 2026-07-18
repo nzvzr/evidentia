@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import VALID_PASSWORD, register
+from tests.conftest import VALID_PASSWORD, register, seed_finalized_document
 
 
 @pytest.fixture
-def team(client, alice):
+def team(client, alice, session_factory, monkeypatch):
     """Alice (owner of Acme) plus an admin and a member in the same tenant."""
     admin = register(client, "admin@acme.co", company="Admin Personal Org")
     member = register(client, "member@acme.co", company="Member Personal Org")
@@ -23,6 +23,7 @@ def team(client, alice):
     # They now belong to two companies each, so they must name the tenant.
     admin.headers_for_acme = {**admin.headers, "X-Company-Id": alice.company_id}
     member.headers_for_acme = {**member.headers, "X-Company-Id": alice.company_id}
+    seed_finalized_document(alice, session_factory, monkeypatch)
     return {"owner": alice, "admin": admin, "member": member, "company_id": alice.company_id}
 
 

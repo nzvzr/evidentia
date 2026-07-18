@@ -17,6 +17,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Float,
     Index,
     Integer,
     LargeBinary,
@@ -165,6 +166,7 @@ class PasswordResetToken(Base):
 class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
+        UniqueConstraint("id", "company_id", name="uq_documents_id_company"),
         # citation_prefix is identity, unique per tenant (minted at M3). The
         # database enforces it so minting can never race itself into two
         # documents sharing a citation family. Nullable stays nullable: NULLs
@@ -381,6 +383,10 @@ class DocumentSection(Base):
 
     __tablename__ = "document_sections"
     __table_args__ = (
+        UniqueConstraint(
+            "id", "version_id", "document_id", "company_id",
+            name="uq_document_sections_id_version_doc_company",
+        ),
         UniqueConstraint("version_id", "anchor_id", name="uq_document_sections_version_anchor"),
         UniqueConstraint("version_id", "ordinal", name="uq_document_sections_version_ordinal"),
         # Also the company_id access path via its leftmost column, so no
@@ -511,6 +517,9 @@ class Persona(Base):
 
 class Report(Base):
     __tablename__ = "reports"
+    __table_args__ = (
+        UniqueConstraint("id", "company_id", name="uq_reports_id_company"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id", ondelete="CASCADE"), index=True)
@@ -524,6 +533,107 @@ class Report(Base):
     llm_provider: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     llm_model: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     confidence: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # M4 provenance lives in DB metadata, never in the public report JSON.
+    source_versions: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+    engine_versions: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    corpus_mode: Mapped[str] = mapped_column(String(16), nullable=False, server_default="demo")
+    corpus_snapshot_digest: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    retrieval_engine_version: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    orchestrator_version: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    execution_mode: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    generation_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="completed"
+    )
+    generation_error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    source_version_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    evidence_section_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     report_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ReportSourceVersion(Base):
+    """Exact immutable document-version set frozen before report generation."""
+
+    __tablename__ = "report_source_versions"
+    __table_args__ = (
+        UniqueConstraint("report_id", "position", name="uq_report_source_versions_position"),
+        UniqueConstraint(
+            "report_id", "document_version_id", name="uq_report_source_versions_version"
+        ),
+        UniqueConstraint(
+            "id", "report_id", "company_id", name="uq_report_source_versions_id_report_company"
+        ),
+        ForeignKeyConstraint(
+            ["report_id", "company_id"],
+            ["reports.id", "reports.company_id"],
+            name="fk_report_source_versions_report_company",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["document_version_id", "document_id", "company_id"],
+            ["document_versions.id", "document_versions.document_id", "document_versions.company_id"],
+            name="fk_report_source_versions_version_company",
+        ),
+        Index("ix_report_source_versions_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    finalization_target_digest: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ReportEvidenceBinding(Base):
+    """Report-local citation registry and bounded immutable display snapshot."""
+
+    __tablename__ = "report_evidence_bindings"
+    __table_args__ = (
+        UniqueConstraint("report_id", "citation_id", name="uq_report_evidence_citation"),
+        UniqueConstraint("report_id", "retrieval_rank", name="uq_report_evidence_rank"),
+        ForeignKeyConstraint(
+            ["report_id", "company_id"],
+            ["reports.id", "reports.company_id"],
+            name="fk_report_evidence_report_company",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["report_source_version_id", "report_id", "company_id"],
+            ["report_source_versions.id", "report_source_versions.report_id", "report_source_versions.company_id"],
+            name="fk_report_evidence_source_report_company",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["section_id", "document_version_id", "document_id", "company_id"],
+            ["document_sections.id", "document_sections.version_id", "document_sections.document_id", "document_sections.company_id"],
+            name="fk_report_evidence_section_company",
+        ),
+        Index("ix_report_evidence_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    report_source_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    section_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    anchor_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    citation_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    section_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    section_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    retrieval_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    retrieval_score: Mapped[float] = mapped_column(Float, nullable=False)
+    selected_for_prompt: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+    cited_in_final: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    evidence_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    text_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    document_title: Mapped[str] = mapped_column(String(300), nullable=False)
+    original_filename: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    section_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    heading_path: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)

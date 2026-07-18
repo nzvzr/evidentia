@@ -29,7 +29,9 @@ def search_document_sections(sections: List[Section], query: str, limit: int = 6
         return sections[:limit]
     scored = sorted(
         sections,
-        key=lambda s: _overlap(f"{s['sectionTitle']} {s['excerpt']}", needles),
+        key=lambda s: _overlap(
+            f"{s['sectionTitle']} {s.get('text', s['excerpt'])}", needles
+        ),
         reverse=True,
     )
     return scored[:limit]
@@ -46,7 +48,9 @@ def rank_sections_for_persona(sections: List[Section], persona: Dict[str, Any], 
     )
     return sorted(
         sections,
-        key=lambda s: _overlap(f"{s['sectionTitle']} {s['excerpt']} {s['category']}", needles),
+        key=lambda s: _overlap(
+            f"{s['sectionTitle']} {s.get('text', s['excerpt'])} {s['category']}", needles
+        ),
         reverse=True,
     )
 

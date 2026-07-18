@@ -27,7 +27,7 @@ from app.repositories import users as users_repo
 
 _UNAUTHENTICATED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Not authenticated",
+    detail={"code": "not_authenticated", "message": "Not authenticated"},
     headers={"WWW-Authenticate": "Bearer"},
 )
 
@@ -138,7 +138,10 @@ def get_company_context(
     if not owned:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User does not belong to any organization",
+            detail={
+                "code": "company_membership_required",
+                "message": "User does not belong to any organization",
+            },
         )
     if len(owned) > 1:
         raise HTTPException(

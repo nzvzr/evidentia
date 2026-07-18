@@ -153,6 +153,36 @@ describe("RunningPage generation lifecycle", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it("shows the tenant corpus label and an actionable empty-corpus refusal", async () => {
+    fetchMock.mockResolvedValue(response(409, { code: "tenant_corpus_empty" }));
+
+    renderStrict();
+    await flush();
+
+    expect(screen.getByText(/Multi-agent workflow .* Tenant corpus/)).toBeTruthy();
+    expect(
+      screen.getByText("Finalize at least one eligible document before generating a tenant report."),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Go to Documents" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("shows an explicit disabled state without attempting a demo fallback", async () => {
+    fetchMock.mockResolvedValue(response(403, { code: "tenant_generation_disabled" }));
+
+    renderStrict();
+    await flush();
+
+    expect(screen.getByText("Tenant generation disabled")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/generate-workflow",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it("maps a real network rejection to unavailable", async () => {
     fetchMock.mockRejectedValue(new TypeError("network down"));
 

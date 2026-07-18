@@ -75,7 +75,9 @@ def _ground_step(t: Dict[str, str], sections: List[Dict[str, Any]]) -> Dict[str,
     best = None
     best_overlap: set[str] = set()
     for s in sections:
-        overlap = needles & tokens(f"{s['sectionTitle']} {s['excerpt']}")
+        overlap = needles & tokens(
+            f"{s['sectionTitle']} {s.get('text', s['excerpt'])}"
+        )
         if len(overlap) > len(best_overlap):
             best_overlap = overlap
             best = s

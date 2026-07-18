@@ -4,8 +4,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { generateReportForId } from "@/data/demoReports";
-import { fetchBackendReport } from "@/lib/reportsApi";
-import type { EvidentiaReport } from "@/lib/types";
+import { fetchBackendReport, fetchReportSourceAudit } from "@/lib/reportsApi";
+import type { EvidentiaReport, ReportSourceAudit } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -46,6 +46,7 @@ export default function ReportDetailPage() {
   const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
 
   const [report, setReport] = useState<EvidentiaReport | null>(null);
+  const [sourceAudit, setSourceAudit] = useState<ReportSourceAudit | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
   const [chartReady, setChartReady] = useState(false);
 
@@ -56,10 +57,14 @@ export default function ReportDetailPage() {
     // locally generated report, which is how another account's data (or a fake
     // report) could be rendered as if it were real.
     (async () => {
-      const backendReport = await fetchBackendReport(id);
+      const [backendReport, audit] = await Promise.all([
+        fetchBackendReport(id),
+        fetchReportSourceAudit(id),
+      ]);
       if (cancelled) return;
       if (backendReport) {
         setReport(backendReport);
+        setSourceAudit(audit);
         setState("ready");
       } else {
         setState("missing");
@@ -110,9 +115,21 @@ export default function ReportDetailPage() {
     mode === "llm-summary" ? "LLM-SUMMARY" : mode === "llm-assisted" ? "LLM-ASSISTED" : "DETERMINISTIC";
   const llmAgentSet =
     mode === "llm-summary" ? SUMMARY_LLM_AGENTS : mode === "llm-assisted" ? LLM_AGENTS : EMPTY_SET;
+  const bindingByCitation = new Map(
+    (sourceAudit?.evidenceBindings ?? []).map((binding) => [binding.citationId, binding]),
+  );
 
   const metricCards = [
-    { k: "Documents", v: String(metrics.documentsAnalyzed), s: "of 8 available", accent: false },
+    {
+      k: "Documents",
+      v: String(metrics.documentsAnalyzed),
+      s: sourceAudit
+        ? sourceAudit.corpusMode === "tenant"
+          ? `${sourceAudit.sourceVersionCount} frozen versions`
+          : "of 8 sample documents"
+        : "corpus unavailable",
+      accent: false,
+    },
     { k: "Passages indexed", v: metrics.passagesIndexed.toLocaleString(), s: "semantic chunks", accent: false },
     { k: "Citations", v: String(metrics.citationsUsed), s: "source-traced", accent: false },
     { k: "Risks flagged", v: String(metrics.risksFlagged), s: severityBreakdown(report), accent: false },
@@ -163,6 +180,13 @@ export default function ReportDetailPage() {
                 title={isLlm && report.llmModel ? `${report.llmProvider} · ${report.llmModel}` : undefined}
               >
                 {modeLabel}
+              </span>
+              <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".06em", padding: "4px 9px", borderRadius: 5, color: "var(--ink2)", background: "var(--shell)", border: "1px solid var(--line2)" }}>
+                {sourceAudit
+                  ? sourceAudit.corpusMode === "tenant"
+                    ? "TENANT CORPUS"
+                    : "SAMPLE CORPUS"
+                  : "CORPUS UNAVAILABLE"}
               </span>
               {personaBrief.isCustom && (
                 <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".06em", padding: "4px 9px", borderRadius: 5, color: "var(--ink2)", background: "var(--shell)", border: "1px solid var(--line2)" }}>
@@ -318,6 +342,11 @@ export default function ReportDetailPage() {
                         {c.section && (
                           <div style={{ fontFamily: mono, fontSize: 10.5, color: "var(--sub)", marginTop: 2 }}>{c.section}</div>
                         )}
+                        {bindingByCitation.get(c.id) && (
+                          <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", marginTop: 3 }}>
+                            VERSION {bindingByCitation.get(c.id)!.documentVersionId} · SECTION {bindingByCitation.get(c.id)!.sectionOrdinal + 1}
+                          </div>
+                        )}
                         <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5, fontStyle: "italic" }}>&ldquo;{c.excerpt}&rdquo;</div>
                       </div>
                     </div>
@@ -325,6 +354,21 @@ export default function ReportDetailPage() {
                 </div>
               )}
             </Card>
+
+            {sourceAudit && (
+              <Card pad="24px 24px">
+                <SectionLabel>SOURCE AUDIT</SectionLabel>
+                <div style={{ display: "grid", gap: 8, fontFamily: mono, fontSize: 10.5, color: "var(--sub)", lineHeight: 1.5 }}>
+                  <div>CORPUS {sourceAudit.corpusMode.toUpperCase()}</div>
+                  <div>{sourceAudit.sourceVersionCount} VERSION{sourceAudit.sourceVersionCount === 1 ? "" : "S"} · {sourceAudit.evidenceSectionCount} SELECTED SECTIONS</div>
+                  <div>RETRIEVAL {sourceAudit.retrievalEngineVersion ?? "—"}</div>
+                  <div>GENERATION {sourceAudit.executionMode ?? "—"}</div>
+                  {sourceAudit.corpusSnapshotDigest && (
+                    <div title={sourceAudit.corpusSnapshotDigest}>SNAPSHOT {sourceAudit.corpusSnapshotDigest.slice(0, 24)}…</div>
+                  )}
+                </div>
+              </Card>
+            )}
 
             <div style={{ background: "#0a0a0b", color: "#f5f5f3", borderRadius: 12, padding: "24px 24px" }}>
               <div style={{ fontFamily: mono, fontSize: 11, color: "rgba(245,245,243,.5)", letterSpacing: ".08em", marginBottom: 18 }}>SUGGESTED ACTIONS</div>

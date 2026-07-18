@@ -1292,3 +1292,95 @@ binding, eligibility target binding, manifest contract, citation-prefix logic,
 frontend, API, report schema and generation untouched (PostgreSQL rerun not
 required — no shared persistence/database code changed); goldens unchanged;
 generation remains demo-only; no M4 code; nothing committed or pushed.
+
+## 2026-07-18 — M4 tenant generation uses frozen report-local evidence bindings
+
+**Decision.** Authenticated generation selects an explicit `tenant` corpus mode
+and the anonymous Next.js showcase selects explicit `demo`; neither mode is
+inferred from query results and neither may fall back to the other. The new
+`EVIDENTIA_TENANT_GENERATION_ENABLED` rollout flag defaults false and is
+independent of ingestion. When enabled, the authenticated FastAPI route creates
+a `TenantCorpusProvider` from membership-derived company context. Empty,
+ineligible, retrieval-invalid and evidence-invalid requests return stable typed
+errors and never substitute sample evidence.
+
+`TenantCorpusProvider` reuses `check_generation_eligibility` exactly. It resolves
+the active company's non-deleted documents to exact eligible current version
+ids, loads exact sections, applies deterministic `tenant-lexical-v1` scoring and
+stable identity tie-breaks, enforces configured document/candidate/selection/
+character/per-document/excerpt limits, rejects ambiguous citation ids, and
+freezes the result before any LLM call. The versioned `tcs1` digest covers company
+scope, sorted version ids, manifest hashes, retrieval version and configuration.
+The shared orchestrator receives the provider explicitly; demo imports remain
+reachable only through `DemoCorpusProvider`. Cache identity includes corpus,
+company and snapshot digest.
+
+Tenant text is quoted evidence, not instructions. LLM prompts keep it out of the
+system instructions and inside labelled `<untrusted-evidence>` blocks; bounded
+derived excerpts neutralize citation-shaped requests only when M3 classified the
+section as injection-like. Stored text is unchanged. The final validator uses one
+report-local citation registry and rejects unknown/ambiguous ids or citation
+display data not copied from the frozen binding. LLM failure may fall back only
+to the deterministic baseline over the same frozen tenant evidence; execution
+metadata records what actually ran.
+
+**Public-schema boundary.** The 20-key `EvidentiaReport` compatibility JSON is
+unchanged. Source provenance is operational/audit metadata, so it lives on the
+report row plus normalized `report_source_versions` and
+`report_evidence_bindings`, exposed separately at tenant-scoped
+`GET /api/reports/{id}/sources`. This avoids deepening the future CAD projection
+while preserving exact version/section/anchor/citation/signature identity.
+Migration `e4b7c9d2a610` adds tenant-safe composite keys/FKs, report generation
+metadata, source ordering and report-local citation/rank uniqueness. Existing
+reports backfill as completed demo reports with no fake bindings.
+
+**Retention.** Document deletion is now a soft delete. Providers exclude deleted
+documents, while immutable versions/sections and bounded report binding snapshots
+remain available to completed reports. This is the smallest safe behavior for M4;
+unbounded full source text is not copied into report bindings. An intentional M4
+downgrade drops M4-only audit tables/columns to return to the exact M3 schema but
+preserves base reports/documents/versions/sections; re-upgrade does not fabricate
+lost bindings.
+
+**Frontend.** The authenticated BFF still proxies only FastAPI and forwards typed
+M4 errors; it never calls the demo route. Running/Documents/report views label
+tenant versus sample evidence honestly. Report citations render exact version and
+section binding data, and a compact audit panel shows counts, retrieval/execution
+mode and snapshot identity. Old demo reports remain readable.
+
+**Deferred.** Embeddings/vector search, PDF/DOCX/OCR, full claims/CAD lifecycle,
+advanced document selection, physical blob retention optimization and report
+regeneration/version comparison remain outside M4.
+
+## 2026-07-18 — M4 post-review hardening keeps the tenant-lexical-v1 contract bounded
+
+**Decision.** `tenant-lexical-v1` scores every section in each exact frozen
+version before the final global candidate cap. Database rows stream in canonical
+ordinal/anchor order; fixed-size batches retain a bounded deterministic
+per-document top-k, and the global candidate set is taken in deterministic
+per-document rank rounds before the existing score/identity sort and configured
+selection, character and per-document caps. Memory is bounded by configured
+documents × candidates, deep sections remain eligible, duplicate citation
+detection stays database-side, and `tcs1` continues to bind every
+output-affecting retrieval setting.
+
+The shared prompt wrapper HTML-encodes `<` and `>` in every case-insensitive
+occurrence of `</untrusted-evidence>` inside the prompt payload. This is a
+deterministic, reversible prompt representation only; immutable stored source
+text is unchanged. Citation-request neutralization remains defence-in-depth for
+classified injection or delimiter-closing attempts, not the wrapper boundary.
+
+Structured evidence fields and citation display values remain exact frozen
+allow-list checks. Narrative scanning no longer treats every uppercase
+hyphenated token as a citation. It recognizes only the active tenant prefix
+families plus the reserved opposite-mode `DEMO-*` family, rejecting unknown IDs
+in those namespaces while leaving ordinary standards and versions untouched.
+Pipeline/orchestration exceptions now return and persist `generation_failed`;
+snapshot/completion write exceptions return `persistence_failed`, with no
+exception or tenant content in responses.
+
+**Deferred M4.1 performance work.** Optimize `GET /api/documents` eligibility
+calculation and consider immutable-key memoization or batched eligibility
+evaluation. F7 remains unchanged because no response-derived state correction
+was needed; F8 downgrade behavior remains unchanged. No cache or eligibility
+redesign is part of this hardening pass.

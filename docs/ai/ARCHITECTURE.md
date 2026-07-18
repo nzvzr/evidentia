@@ -69,6 +69,27 @@ can be served without the backend, and it never has authority to invent a sessio
 
 ## Backend pipeline (`backend/app/agents/orchestrator.py`)
 
+The orchestrator receives one explicit `SectionProvider` for the whole run.
+`DemoCorpusProvider` reads only the bundled sample corpus. Authenticated FastAPI
+generation selects `TenantCorpusProvider` only, using membership-derived company
+context; it never accepts company/source/citation identity from the browser and
+never falls back to demo. `EVIDENTIA_TENANT_GENERATION_ENABLED` is an independent,
+default-off rollout gate.
+
+The tenant provider resolves each non-deleted document's exact current version
+and delegates acceptance to the M3 `check_generation_eligibility` predicate. It
+then freezes exact versions and sections before generation. Retrieval
+`tenant-lexical-v1` is deterministic lexical scoring over title, heading,
+classification and full canonical text. Each exact version is streamed in
+canonical section order and scored before a bounded per-document top-k is
+retained; scored lists are then truncated globally in deterministic document-rank
+rounds and re-sorted by score plus stable identity tie-breaks. This keeps deep
+sections eligible without unbounded application memory or allowing one document
+to consume the candidate budget. Document/candidate/selection/character/
+per-document/excerpt limits remain explicit. The `tcs1` digest binds company
+scope, sorted version ids, manifests, retrieval version and configuration. No
+transaction is held over an LLM call.
+
 Deterministic agents run in order, then optional LLM refinement, then repair and
 assembly:
 
@@ -96,6 +117,17 @@ Safeguards before/after refinement:
 (unchanged public contract). Telemetry carries tokens, cost inputs, cache status,
 prompt version, gate decisions, and repair counts.
 
+Tenant document text is untrusted evidence. It is never placed in the LLM system
+instructions; bounded prompt evidence is wrapped in labelled
+`<untrusted-evidence>` blocks with an explicit do-not-follow rule. Every
+case-variant of the closing sentinel inside the prompt payload is deterministically
+HTML-encoded while stored source text remains unchanged. The final tenant
+validator accepts only citation ids in the frozen report-local registry and
+requires citation source/section/excerpt display data to match its bound section.
+Narrative defence-in-depth recognizes unknown IDs only in the active tenant
+citation-prefix families and the reserved opposite-mode `DEMO-*` family, so
+standards such as ISO-27001, SOC-2 and PCI-DSS-4.0 remain ordinary text.
+
 ## Evaluation framework (`backend/app/eval/`)
 
 - `dataset.py` — versioned scenarios + ground-truth expectations.
@@ -110,6 +142,19 @@ prompt version, gate decisions, and repair counts.
 SQLAlchemy 2.x models (`users`, `companies`, `company_members`, `documents`,
 `personas`, `reports`) with Alembic migrations. Reports store the full report JSON.
 The database is the **only** store for authenticated data.
+
+M4 migration `e4b7c9d2a610` keeps the 20-key `EvidentiaReport` compatibility JSON
+unchanged and stores operational provenance separately: report-level corpus/
+snapshot/retrieval/orchestrator/execution/status/count metadata,
+`report_source_versions` for the ordered exact version set, and
+`report_evidence_bindings` for report-local section/citation/rank bindings and
+bounded display excerpts. Composite report/company, version/document/company and
+section/version/document/company foreign keys make cross-tenant bindings invalid
+at SQL level. `GET /api/reports/{id}/sources` is the tenant-scoped audit projection.
+
+Document deletion is soft deletion. New provider snapshots exclude deleted
+documents, while immutable versions/sections and completed report bindings remain
+auditable. Full document text is not copied into report bindings.
 
 - **Production requires managed PostgreSQL.** `DATABASE_URL=postgresql://…`
 - **SQLite (empty `DATABASE_URL`) is local development only.** Container
@@ -147,7 +192,9 @@ lock) — sufficient, but a different mechanism, and dev-only.
 `EVIDENTIA_MAX_OUTPUT_TOKENS`, `EVIDENTIA_ENABLE_CACHE`, `DATABASE_URL`,
 `EVIDENTIA_DB_ENABLED`, `JWT_SECRET`, `EVIDENTIA_BFF_SECRET`,
 `EVIDENTIA_EMAIL_BACKEND` (+ SMTP settings), `EVIDENTIA_CORS_ORIGINS`,
-`EVIDENTIA_TRUSTED_PROXY_COUNT`. Frontend uses `EVIDENTIA_BACKEND_URL` (server-only).
+`EVIDENTIA_TRUSTED_PROXY_COUNT`, `EVIDENTIA_TENANT_CORPUS_ENABLED`,
+`EVIDENTIA_TENANT_GENERATION_ENABLED`, and bounded tenant retrieval settings.
+Frontend uses `EVIDENTIA_BACKEND_URL` (server-only).
 
 Production refuses to start on: a missing or non-generated `JWT_SECRET`, a
 non-generated `EVIDENTIA_BFF_SECRET` (both must be the base64url/hex encoding of

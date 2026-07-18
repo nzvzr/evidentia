@@ -200,14 +200,8 @@ class TestSchemaConstraints:
 
 
 class TestApplicationEngineForeignKeys:
-    def test_document_delete_cascades_on_the_application_engine(self, tmp_path):
-        """SQLite enforces foreign keys only when the connection says
-        `PRAGMA foreign_keys=ON`. The conftest engine always set it, which
-        masked that the REAL application engine did not — deleting a document
-        there stranded its versions, blobs and jobs. This test builds its
-        engine through the same factory `app/db/session.py` uses, so it fails
-        without the application pragma and passes with it.
-        """
+    def test_document_delete_is_soft_and_preserves_source_history(self, tmp_path):
+        """M4 deletion hides the document but retains immutable source rows."""
         eng = create_application_engine(f"sqlite:///{tmp_path / 'app.db'}")
         Base.metadata.create_all(bind=eng)
         factory = sessionmaker(bind=eng, autoflush=False, autocommit=False, future=True)
@@ -227,9 +221,11 @@ class TestApplicationEngineForeignKeys:
             assert delete_document(db, doc.id, company.id) is True
             db.commit()
 
-            assert db.execute(select(DocumentVersion)).scalars().all() == []
-            assert db.execute(select(DocumentBlob)).scalars().all() == []
-            assert db.execute(select(IngestionJob)).scalars().all() == []
+            db.expire_all()
+            assert db.get(Document, doc.id).deleted_at is not None
+            assert len(db.execute(select(DocumentVersion)).scalars().all()) == 1
+            assert len(db.execute(select(DocumentBlob)).scalars().all()) == 1
+            assert len(db.execute(select(IngestionJob)).scalars().all()) == 1
         finally:
             db.close()
             eng.dispose()

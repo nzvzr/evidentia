@@ -565,7 +565,9 @@ class TestJsonCreateLimits:
 
 
 class TestGenerationIsolation:
-    def test_generation_still_uses_demo_corpus_only(self, alice, corpus_on, session_factory):
+    def test_authenticated_generation_never_falls_back_to_demo(
+        self, alice, corpus_on, session_factory, monkeypatch
+    ):
         body = (
             b"# Quantum Flux Policy\n\n## Chrono Controls\n\n"
             b"The zorblax-7 flux capacitor must be recalibrated weekly by the chrono team.\n"
@@ -573,24 +575,12 @@ class TestGenerationIsolation:
         res = upload(alice, body, "quantum.md")
         doc_id = res.json()["documentId"]
         drain_jobs(session_factory)
+        monkeypatch.setattr(get_settings(), "evidentia_tenant_generation_enabled", True)
 
         gen = alice.post(
             "/api/generate-workflow",
             json={"market": "EMEA", "persona": "Support Agent", "selectedDocumentIds": [doc_id]},
         )
-        assert gen.status_code == 200
-        report = gen.json()
-        dump = json.dumps(report)
-        # No tenant content and no tenant/demo mixing: the unknown tenant id
-        # falls back to the demo corpus, and nothing from the upload leaks in.
-        assert "zorblax-7" not in dump
-        assert "Quantum Flux" not in dump
-        demo_titles = (
-            "Security & Compliance Whitepaper",
-            "SLA & Uptime Commitment",
-            "Deployment & Migration Guide",
-            "Customer Onboarding Handbook",
-        )
-        assert report["citations"], "expected demo-corpus citations"
-        for citation in report["citations"]:
-            assert citation["source"].startswith(demo_titles)
+        assert gen.status_code == 409
+        assert gen.json()["code"] == "tenant_corpus_ineligible"
+        assert "SEC-" not in gen.text

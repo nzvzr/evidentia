@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, List, Optional
 
 from sqlalchemy import select
@@ -12,7 +13,11 @@ from app.models.db_models import Document
 
 def list_documents(db: Session, company_id: str) -> List[Document]:
     return list(
-        db.execute(select(Document).where(Document.company_id == company_id).order_by(Document.created_at.desc()))
+        db.execute(
+            select(Document)
+            .where(Document.company_id == company_id, Document.deleted_at.is_(None))
+            .order_by(Document.created_at.desc())
+        )
         .scalars()
         .all()
     )
@@ -22,7 +27,11 @@ def get_document(db: Session, document_id: str, company_id: str) -> Optional[Doc
     """Tenant-scoped lookup. `company_id` is mandatory: a document belonging to
     another tenant is indistinguishable from one that does not exist."""
     return db.execute(
-        select(Document).where(Document.id == document_id, Document.company_id == company_id)
+        select(Document).where(
+            Document.id == document_id,
+            Document.company_id == company_id,
+            Document.deleted_at.is_(None),
+        )
     ).scalar_one_or_none()
 
 
@@ -30,7 +39,10 @@ def delete_document(db: Session, document_id: str, company_id: str) -> bool:
     row = get_document(db, document_id, company_id)
     if not row:
         return False
-    db.delete(row)
+    # M4 retention rule: reports bind immutable versions/sections. Soft deletion
+    # removes a source from library/generation without invalidating that audit
+    # history. Hard purge is a separate future workflow.
+    row.deleted_at = datetime.utcnow()
     db.flush()
     return True
 

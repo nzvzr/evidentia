@@ -13,11 +13,14 @@ import pytest
 from app.core.config import get_settings
 from app.models.db_models import Report
 from app.repositories import reports as reports_repo
+from app import main as main_module
 
 GEN = {"market": "EMEA", "persona": "Support Agent"}
 
 
-def test_successful_generation_is_immediately_retrievable(client, alice, db_session):
+def test_successful_generation_is_immediately_retrievable(
+    client, alice, db_session, tenant_generation
+):
     res = alice.post("/api/generate-workflow", json=GEN)
     assert res.status_code == 200
     report_id = res.json()["id"]
@@ -27,13 +30,15 @@ def test_successful_generation_is_immediately_retrievable(client, alice, db_sess
     assert alice.get(f"/api/reports/{report_id}").status_code == 200
 
 
-def test_persistence_failure_returns_5xx_not_an_unsaved_report(client, alice, monkeypatch):
+def test_persistence_failure_returns_5xx_not_an_unsaved_report(
+    client, alice, monkeypatch, tenant_generation
+):
     """A commit failure must surface as an error, never as a successful report."""
 
     def boom(*_args, **_kwargs):
         raise RuntimeError("simulated commit failure")
 
-    monkeypatch.setattr(reports_repo, "create_report", boom)
+    monkeypatch.setattr(reports_repo, "create_generation_run", boom)
 
     res = alice.post("/api/generate-workflow", json=GEN)
     assert res.status_code == 503, "a persistence failure was reported as success"
@@ -42,22 +47,63 @@ def test_persistence_failure_returns_5xx_not_an_unsaved_report(client, alice, mo
     assert "workflowSteps" not in res.text
 
 
-def test_no_orphan_report_row_after_a_failed_generation(client, alice, monkeypatch, db_session):
+def test_no_orphan_report_row_after_a_failed_generation(
+    client, alice, monkeypatch, db_session, tenant_generation
+):
     before = db_session.query(Report).count()
 
     def boom(*_args, **_kwargs):
         raise RuntimeError("simulated commit failure")
 
-    monkeypatch.setattr(reports_repo, "create_report", boom)
+    monkeypatch.setattr(reports_repo, "create_generation_run", boom)
     alice.post("/api/generate-workflow", json=GEN)
 
     db_session.expire_all()
     assert db_session.query(Report).count() == before, "a partial row survived rollback"
 
 
+def test_pipeline_failure_returns_generation_failed_and_marks_run_failed(
+    client, alice, monkeypatch, db_session, tenant_generation
+):
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("tenant document secret must not leak")
+
+    monkeypatch.setattr(main_module, "run_pipeline_ex", boom)
+    res = alice.post("/api/generate-workflow", json=GEN)
+
+    assert res.status_code == 503
+    assert res.json()["code"] == "generation_failed"
+    assert "tenant document secret" not in res.text
+    db_session.expire_all()
+    row = db_session.query(Report).order_by(Report.created_at.desc()).first()
+    assert row.generation_status == "failed"
+    assert row.generation_error_code == "generation_failed"
+    assert row.report_json == {}
+
+
+def test_completion_persistence_failure_returns_persistence_failed_and_marks_run_failed(
+    client, alice, monkeypatch, db_session, tenant_generation
+):
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("tenant document secret must not leak")
+
+    monkeypatch.setattr(reports_repo, "complete_generation_run", boom)
+    res = alice.post("/api/generate-workflow", json=GEN)
+
+    assert res.status_code == 503
+    assert res.json()["code"] == "persistence_failed"
+    assert "tenant document secret" not in res.text
+    db_session.expire_all()
+    row = db_session.query(Report).order_by(Report.created_at.desc()).first()
+    assert row.generation_status == "failed"
+    assert row.generation_error_code == "persistence_failed"
+    assert row.report_json == {}
+
+
 def test_generation_is_refused_when_the_database_is_disabled(client, alice, monkeypatch):
     """Authenticated generation with persistence off cannot keep its promise."""
     monkeypatch.setattr(get_settings(), "evidentia_db_enabled", False)
+    monkeypatch.setattr(get_settings(), "evidentia_tenant_generation_enabled", True)
 
     res = alice.post("/api/generate-workflow", json=GEN)
     assert res.status_code == 503

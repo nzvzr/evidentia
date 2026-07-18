@@ -10,7 +10,8 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.orm import Session
 
-from app.agents.orchestrator import run_pipeline
+from app.agents.orchestrator import run_pipeline_ex
+from app.agents.section_provider import TenantCorpusError, TenantCorpusProvider, TenantRetrievalConfig
 from app.api import auth, companies, documents, personas, reports
 from app.api.deps import CompanyContext, get_company_context
 from app.api.limits import enforce_generation
@@ -209,6 +210,16 @@ def generate_workflow(
     The report is persisted against the authenticated user's company — there is
     no shared demo company to fall back into.
     """
+    settings = get_settings()
+    if not settings.evidentia_tenant_generation_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "tenant_generation_disabled",
+                "message": "Tenant report generation is not enabled for this deployment.",
+            },
+        )
+
     # This endpoint spends LLM budget, so it carries its own (much tighter)
     # limits: per user, per tenant, and per IP. Enforced after authentication so
     # an anonymous flood is rejected by the 401 first, and the budget is only
@@ -219,7 +230,6 @@ def generate_workflow(
     # be fetched back. Persistence is therefore NOT best-effort — if it fails, the
     # request failed. Returning an unsaved report with 200 sent the client to a
     # report id that did not exist, and billed an LLM call for nothing.
-    settings = get_settings()
     if not settings.is_db_enabled():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -229,18 +239,46 @@ def generate_workflow(
             },
         )
 
-    # Deterministic (optionally LLM-assisted) generation; never raises for LLM issues.
-    report = run_pipeline(
-        market=body.market,
-        persona=body.persona,
-        custom_persona=body.customPersona,
-        selected_document_ids=body.selectedDocumentIds,
-    )
+    try:
+        provider = TenantCorpusProvider.prepare(
+            db,
+            company_id=ctx.company_id,
+            company_name=ctx.company.name,
+            user_id=ctx.user_id,
+            selected_document_ids=body.selectedDocumentIds,
+            query=" ".join([body.market, body.persona, body.customPersona]),
+            config=TenantRetrievalConfig(
+                max_documents=settings.evidentia_tenant_retrieval_max_documents,
+                max_candidate_sections=settings.evidentia_tenant_retrieval_max_candidate_sections,
+                max_selected_sections=settings.evidentia_tenant_retrieval_max_selected_sections,
+                max_total_chars=settings.evidentia_tenant_retrieval_max_total_chars,
+                per_document_cap=settings.evidentia_tenant_retrieval_per_document_cap,
+                excerpt_chars=settings.evidentia_tenant_evidence_excerpt_chars,
+            ),
+        )
+    except TenantCorpusError as exc:
+        code_status = {
+            "tenant_corpus_empty": status.HTTP_409_CONFLICT,
+            "tenant_corpus_ineligible": status.HTTP_409_CONFLICT,
+            "evidence_validation_failed": status.HTTP_422_UNPROCESSABLE_ENTITY,
+        }.get(exc.code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        raise HTTPException(
+            status_code=code_status,
+            detail={"code": exc.code, "message": exc.message},
+        ) from None
 
     try:
-        row = reports_repo.create_report(db, ctx.company_id, report, user_id=ctx.user_id)
+        row = reports_repo.create_generation_run(
+            db,
+            company_id=ctx.company_id,
+            user_id=ctx.user_id,
+            market=body.market,
+            persona=body.persona,
+            custom_persona=body.customPersona,
+            provider=provider,
+        )
     except Exception as exc:  # noqa: BLE001 - surfaced as a failure, never as success
-        logger.error("Report persistence failed: %s", exc)
+        logger.error("Report snapshot persistence failed: %s", type(exc).__name__)
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -250,4 +288,49 @@ def generate_workflow(
             },
         )
 
-    return row.report_json  # includes the DB id
+    try:
+        report, telemetry = run_pipeline_ex(
+            market=body.market,
+            persona=body.persona,
+            custom_persona=body.customPersona,
+            selected_document_ids=body.selectedDocumentIds,
+            section_provider=provider,
+            company_name=ctx.company.name,
+        )
+    except Exception as exc:  # noqa: BLE001 - no report/source text is logged
+        logger.error("Tenant generation failed: %s", type(exc).__name__)
+        reports_repo.fail_generation_run(db, row.id, ctx.company_id, "generation_failed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "generation_failed",
+                "message": "The report could not be generated; please retry.",
+            },
+        ) from None
+
+    try:
+        row = reports_repo.complete_generation_run(db, row, report, telemetry, provider)
+    except reports_repo.EvidenceValidationError:
+        logger.warning("Tenant evidence validation failed")
+        reports_repo.fail_generation_run(
+            db, row.id, ctx.company_id, "evidence_validation_failed"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "evidence_validation_failed",
+                "message": "Generated evidence did not match the frozen tenant snapshot.",
+            },
+        ) from None
+    except Exception as exc:  # noqa: BLE001 - no report/source text is logged
+        logger.error("Report completion persistence failed: %s", type(exc).__name__)
+        reports_repo.fail_generation_run(db, row.id, ctx.company_id, "persistence_failed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "persistence_failed",
+                "message": "The report could not be saved. Nothing was completed; please retry.",
+            },
+        ) from None
+
+    return row.report_json  # includes the DB id; public schema unchanged

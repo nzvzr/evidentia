@@ -11,7 +11,7 @@ Cross-tenant access must answer 404, not 403: a 403 confirms the id exists.
 from __future__ import annotations
 
 from app.models.db_models import Company, Report
-from tests.conftest import register
+from tests.conftest import register, seed_finalized_document
 
 REPORT = {
     "id": "client-supplied-id",
@@ -24,8 +24,9 @@ REPORT = {
 }
 
 
-def _create_report(account, body=None):
+def _create_report(account, session_factory, monkeypatch, body=None):
     """Reports are created only by authenticated generation."""
+    seed_finalized_document(account, session_factory, monkeypatch)
     res = account.post("/api/generate-workflow", json={"market": "EMEA", "persona": "Support Agent"})
     assert res.status_code == 200, res.text
     return res.json()["id"]
@@ -51,8 +52,8 @@ def test_every_tenant_endpoint_requires_authentication(client):
 # --- report IDOR ---------------------------------------------------------
 
 
-def test_bob_cannot_read_alices_report_by_id(client, alice, bob):
-    report_id = _create_report(alice)
+def test_bob_cannot_read_alices_report_by_id(client, alice, bob, session_factory, monkeypatch):
+    report_id = _create_report(alice, session_factory, monkeypatch)
     assert alice.get(f"/api/reports/{report_id}").status_code == 200
 
     res = bob.get(f"/api/reports/{report_id}")
@@ -60,15 +61,15 @@ def test_bob_cannot_read_alices_report_by_id(client, alice, bob):
     assert "persona" not in res.text
 
 
-def test_bob_cannot_delete_alices_report(client, alice, bob):
-    report_id = _create_report(alice)
+def test_bob_cannot_delete_alices_report(client, alice, bob, session_factory, monkeypatch):
+    report_id = _create_report(alice, session_factory, monkeypatch)
     assert bob.delete(f"/api/reports/{report_id}").status_code == 404
     # Still there for its rightful owner.
     assert alice.get(f"/api/reports/{report_id}").status_code == 200
 
 
-def test_bob_cannot_list_alices_reports_by_passing_her_company_id(client, alice, bob):
-    _create_report(alice)
+def test_bob_cannot_list_alices_reports_by_passing_her_company_id(client, alice, bob, session_factory, monkeypatch):
+    _create_report(alice, session_factory, monkeypatch)
     assert len(alice.get("/api/reports").json()["reports"]) == 1
 
     # Naming a company you are not a member of must not grant access.
@@ -78,16 +79,19 @@ def test_bob_cannot_list_alices_reports_by_passing_her_company_id(client, alice,
     assert bob.get("/api/reports").json()["reports"] == []
 
 
-def test_company_id_header_cannot_be_forged(client, alice, bob):
-    _create_report(alice)
+def test_company_id_header_cannot_be_forged(client, alice, bob, session_factory, monkeypatch):
+    _create_report(alice, session_factory, monkeypatch)
     res = bob.get("/api/reports", headers={**bob.headers, "X-Company-Id": alice.company_id})
     assert res.status_code == 404
 
 
-def test_report_ownership_is_taken_from_the_session_not_the_body(client, alice, bob, db_session):
+def test_report_ownership_is_taken_from_the_session_not_the_body(
+    client, alice, bob, db_session, session_factory, monkeypatch
+):
     """Generation ignores any client-supplied ownership; the report lands in the
     caller's tenant. (The old POST /api/reports body-ownership hole is gone
     entirely — that endpoint no longer creates anything.)"""
+    seed_finalized_document(bob, session_factory, monkeypatch)
     res = bob.post(
         "/api/generate-workflow",
         json={"market": "EMEA", "persona": "Support Agent",
@@ -101,7 +105,10 @@ def test_report_ownership_is_taken_from_the_session_not_the_body(client, alice, 
     assert alice.get("/api/reports").json()["reports"] == []
 
 
-def test_generated_report_is_scoped_to_the_callers_tenant(client, alice, bob, db_session):
+def test_generated_report_is_scoped_to_the_callers_tenant(
+    client, alice, bob, db_session, session_factory, monkeypatch
+):
+    seed_finalized_document(alice, session_factory, monkeypatch)
     res = alice.post("/api/generate-workflow", json={"market": "EMEA", "persona": "Support Agent"})
     assert res.status_code == 200
     row = db_session.get(Report, res.json()["id"])
@@ -175,13 +182,15 @@ def test_registering_creates_a_distinct_company_per_user(client, db_session):
     assert db_session.query(Company).count() == 2
 
 
-def test_two_users_registering_the_same_company_name_get_separate_tenants(client):
+def test_two_users_registering_the_same_company_name_get_separate_tenants(
+    client, session_factory, monkeypatch
+):
     """Name collision must not merge tenants."""
     a = register(client, "a@x.co", company="Acme")
     b = register(client, "b@y.co", company="Acme")
     assert a.company_id != b.company_id
 
-    report_id = _create_report(a)
+    report_id = _create_report(a, session_factory, monkeypatch)
     assert b.get(f"/api/reports/{report_id}").status_code == 404
 
 

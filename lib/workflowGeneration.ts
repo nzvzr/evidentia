@@ -10,6 +10,8 @@ export type GenerationResult =
   | { kind: "expired" }
   | { kind: "limited" }
   | { kind: "unavailable" }
+  | { kind: "empty" }
+  | { kind: "disabled" }
   | { kind: "error" }
   | { kind: "cancelled" };
 
@@ -78,6 +80,14 @@ function beginFlight(key: string, run: PendingRun): Flight {
       if (res.status === 401) return { kind: "expired" };
       if (res.status === 429) return { kind: "limited" };
       if (res.status === 503) return { kind: "unavailable" };
+      if (res.status === 403 || res.status === 409 || res.status === 422) {
+        const data = (await res.json().catch(() => ({}))) as { code?: string };
+        if (data.code === "tenant_generation_disabled") return { kind: "disabled" };
+        if (data.code === "tenant_corpus_empty" || data.code === "tenant_corpus_ineligible") {
+          return { kind: "empty" };
+        }
+        return { kind: "error" };
+      }
       if (!res.ok) return { kind: "error" };
 
       let body: unknown;

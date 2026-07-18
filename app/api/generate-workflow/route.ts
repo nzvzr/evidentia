@@ -100,14 +100,30 @@ export async function POST(request: Request) {
         ),
       );
     }
-    if (res.status === 403) {
-      const data = await res.json().catch(() => ({}));
+    if (res.status === 403 || res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { code?: string; detail?: string };
+      const known = new Set([
+        "tenant_generation_disabled",
+        "tenant_corpus_empty",
+        "tenant_corpus_ineligible",
+        "company_membership_required",
+      ]);
+      const code = typeof data.code === "string" && known.has(data.code) ? data.code : "forbidden";
       return NextResponse.json(
         {
-          code: "forbidden",
-          error: typeof data?.detail === "string" ? data.detail : "Not permitted.",
+          code,
+          error:
+            code === "tenant_generation_disabled"
+              ? "Tenant report generation is not enabled for this deployment."
+              : code === "tenant_corpus_empty" || code === "tenant_corpus_ineligible"
+                ? "Finalize at least one eligible document before generating a tenant report."
+                : code === "company_membership_required"
+                  ? "Join or create an organization before generating a tenant report."
+                : typeof data.detail === "string"
+                  ? data.detail
+                  : "Not permitted.",
         },
-        { status: 403 },
+        { status: res.status },
       );
     }
 
@@ -122,6 +138,19 @@ export async function POST(request: Request) {
         },
         { status: 429, headers: retryAfter ? { "Retry-After": retryAfter } : undefined },
       );
+    }
+
+    if (res.status === 422) {
+      const data = (await res.json().catch(() => ({}))) as { code?: string };
+      if (data.code === "evidence_validation_failed") {
+        return NextResponse.json(
+          {
+            code: "evidence_validation_failed",
+            error: "Generated evidence could not be validated against the tenant snapshot.",
+          },
+          { status: 422 },
+        );
+      }
     }
 
     if (res.status === 413 || res.status === 422) {
@@ -139,12 +168,14 @@ export async function POST(request: Request) {
       const code =
         data?.code === "persistence_failed" || data?.code === "persistence_unavailable"
           ? data.code
+          : data?.code === "tenant_retrieval_failed"
+            ? data.code
           : "backend_unavailable";
       return NextResponse.json(
         {
           code,
           error:
-            code === "backend_unavailable"
+            code === "backend_unavailable" || code === "tenant_retrieval_failed"
               ? "Report generation is temporarily unavailable. Please try again shortly."
               : "Your report could not be saved, so it was not created. Please try again.",
         },

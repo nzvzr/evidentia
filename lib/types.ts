@@ -296,3 +296,44 @@ export interface EvidentiaReport {
   /** LLM model used, when llm-assisted */
   llmModel?: string;
 }
+
+/** Authenticated audit projection. Kept out of EvidentiaReport compatibility JSON. */
+export interface ReportEvidenceSource {
+  documentId: string;
+  documentVersionId: string;
+  documentTitle: string;
+  originalFilename?: string | null;
+  sectionOrdinal: number;
+  headingPath: string[];
+  sectionTitle: string;
+  anchorId: string;
+  citationId: string;
+  sectionSignature: string;
+  retrievalRank: number;
+  retrievalScore: number;
+  selectedForPrompt: boolean;
+  citedInFinal: boolean;
+  excerpt: string;
+}
+
+export interface ReportSourceAudit {
+  corpusMode: "demo" | "tenant";
+  corpusSnapshotDigest?: string | null;
+  retrievalEngineVersion?: string | null;
+  orchestratorVersion?: string | null;
+  executionMode?: string | null;
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  sourceVersionCount: number;
+  evidenceSectionCount: number;
+  generationStatus: string;
+  sourceVersions: Array<{
+    documentId: string;
+    documentVersionId: string;
+    versionNo: number;
+    manifestSha256: string;
+    finalizationTargetDigest: string;
+    position: number;
+  }>;
+  evidenceBindings: ReportEvidenceSource[];
+}

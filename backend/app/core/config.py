@@ -336,6 +336,22 @@ class Settings(BaseSettings):
     # the whole rollback (reports are snapshots — nothing to migrate back).
     evidentia_tenant_corpus_enabled: bool = False
 
+    # M4 rollout gate. This is deliberately independent from ingestion: an
+    # operator may ingest/finalize documents before allowing those documents to
+    # drive authenticated reports. Disabled never means "use the demo corpus".
+    evidentia_tenant_generation_enabled: bool = False
+    # Deterministic Stage-1 retrieval bounds (tenant-lexical-v1). These limits
+    # are part of the snapshot identity and therefore audit-visible.
+    evidentia_tenant_retrieval_max_documents: int = 50
+    evidentia_tenant_retrieval_max_candidate_sections: int = 500
+    evidentia_tenant_retrieval_max_selected_sections: int = 40
+    evidentia_tenant_retrieval_max_total_chars: int = 60_000
+    evidentia_tenant_retrieval_per_document_cap: int = 10
+    evidentia_tenant_evidence_excerpt_chars: int = 1_200
+    # Shared report cache is process-local; keep it bounded. Tenant keys include
+    # company + immutable snapshot identity, so entries cannot cross tenants.
+    evidentia_report_cache_max_entries: int = 128
+
     # --- document ingestion (M2: MD/TXT upload + worker) ---
     # Per-file byte cap, enforced while the upload streams (Content-Length is
     # never trusted alone). MD/TXT only in M2, so the cap is modest; later

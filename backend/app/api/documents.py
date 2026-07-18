@@ -43,6 +43,7 @@ from app.services import document_finalize as finalize_service
 from app.services import document_upload as upload_service
 from app.services.document_finalize import FinalizeRejected
 from app.services.document_upload import UploadOutcome, UploadRejected
+from app.services.generation_eligibility import is_generation_eligible
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -74,6 +75,7 @@ def _ingestion_payload(
     doc: Document,
     version: Optional[DocumentVersion],
     current: Optional[DocumentVersion] = None,
+    generation_eligible: bool = False,
 ) -> Dict[str, Any]:
     """Safe, tenant-visible ingestion state. `ready` alone still means only
     "parsed and sectionized"; `identity`/`citationReady` distinguish the M2
@@ -99,6 +101,7 @@ def _ingestion_payload(
             and current.status == VERSION_STATUS_READY
             and _version_identity(current) == "final"
         ),
+        "generationEligible": generation_eligible,
         "versionNo": version.version_no if version is not None else None,
         "filename": doc.original_filename,
         "detectedFormat": _format_label(doc),
@@ -116,6 +119,7 @@ def _serialize(
     doc: Document,
     version: Optional[DocumentVersion] = None,
     current: Optional[DocumentVersion] = None,
+    generation_eligible: bool = False,
 ) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "id": doc.id,
@@ -130,7 +134,9 @@ def _serialize(
     # Additive, flag-gated: with the corpus off the response shape stays
     # byte-for-byte the pre-M2 one (pinned by test).
     if _corpus_enabled():
-        data["ingestion"] = _ingestion_payload(doc, version, current)
+        data["ingestion"] = _ingestion_payload(
+            doc, version, current, generation_eligible
+        )
     return data
 
 
@@ -173,6 +179,7 @@ def _upload_config() -> Dict[str, Any]:
         "enabled": True,
         "acceptedExtensions": [".md", ".txt"],
         "maxFileBytes": settings.evidentia_upload_max_file_bytes,
+        "generationEnabled": settings.evidentia_tenant_generation_enabled,
     }
 
 
@@ -190,7 +197,17 @@ def get_documents(
             )
             current = _current_versions(db, ctx.company_id, rows) if corpus_on else {}
             body: Dict[str, Any] = {
-                "documents": [_serialize(r, latest.get(r.id), current.get(r.id)) for r in rows]
+                "documents": [
+                    _serialize(
+                        r,
+                        latest.get(r.id),
+                        current.get(r.id),
+                        is_generation_eligible(
+                            db, current.get(r.id), company_id=ctx.company_id
+                        ),
+                    )
+                    for r in rows
+                ]
             }
             if corpus_on:
                 body["tenantCorpus"] = _upload_config()
@@ -216,7 +233,14 @@ def get_document(
     if _corpus_enabled():
         version = upload_service.latest_version(db, doc.id, ctx.company_id)
         current = _current_versions(db, ctx.company_id, [doc]).get(doc.id)
-    return _serialize(doc, version, current)
+    return _serialize(
+        doc,
+        version,
+        current,
+        is_generation_eligible(db, current, company_id=ctx.company_id)
+        if _corpus_enabled()
+        else False,
+    )
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

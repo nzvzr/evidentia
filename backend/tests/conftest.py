@@ -40,6 +40,14 @@ def rate_limiter(monkeypatch) -> RateLimiter:
     limiter = RateLimiter(clock=clock, enabled=True)
     limiter.clock = clock  # type: ignore[attr-defined]  (test convenience)
     monkeypatch.setattr(limits_module, "get_rate_limiter", lambda: limiter)
+    # Local .env is intentionally developer-owned and may have rollout/LLM
+    # flags enabled. Tests start from product defaults and opt in explicitly.
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "evidentia_tenant_corpus_enabled", False)
+    monkeypatch.setattr(settings, "evidentia_tenant_generation_enabled", False)
+    monkeypatch.setattr(settings, "evidentia_use_llm", False)
     return limiter
 
 
@@ -199,6 +207,55 @@ def bob(client) -> Account:
 
 
 GEN_INPUT = {"market": "EMEA", "persona": "Support Agent"}
+
+TENANT_POLICY = b"""# Access Control Policy
+
+## Administrative access
+
+Administrative access requires multi-factor authentication. Emergency access
+must be reviewed within 24 hours. Unique marker: ZORBLAX-999-A.
+
+## Incident escalation
+
+Severity one incidents require immediate on-call escalation and a review.
+"""
+
+
+def seed_finalized_document(
+    account: Account,
+    session_factory,
+    monkeypatch,
+    *,
+    body: bytes = TENANT_POLICY,
+    filename: str = "tenant-policy.md",
+) -> str:
+    """Create one real M3-eligible current version for generation tests."""
+    from app.core.config import get_settings
+    from app.ingestion.worker import IngestionWorker
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "evidentia_tenant_corpus_enabled", True)
+    monkeypatch.setattr(settings, "evidentia_tenant_generation_enabled", True)
+    monkeypatch.setattr(settings, "evidentia_use_llm", False)
+    uploaded = account.post(
+        "/api/documents/upload",
+        files={"file": (filename, body, "text/markdown")},
+    )
+    assert uploaded.status_code == 202, uploaded.text
+    document_id = uploaded.json()["documentId"]
+    worker = IngestionWorker(session_factory, poll_seconds=0.01, max_attempts=3)
+    while worker.process_one():
+        pass
+    finalized = account.post(f"/api/documents/{document_id}/finalize")
+    assert finalized.status_code in (200, 202), finalized.text
+    while worker.process_one():
+        pass
+    return document_id
+
+
+@pytest.fixture
+def tenant_generation(alice, session_factory, monkeypatch) -> str:
+    return seed_finalized_document(alice, session_factory, monkeypatch)
 
 
 def create_report(account, headers=None) -> str:

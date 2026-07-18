@@ -38,10 +38,10 @@ const useHydrated = () =>
  * authenticated-looking report for a session nobody validated. If the server
  * cannot generate it, we say so and offer a retry.
  */
-type Phase = "running" | "finalizing" | "slow" | "success" | "unavailable" | "limited" | "expired" | "error";
+type Phase = "running" | "finalizing" | "slow" | "success" | "unavailable" | "limited" | "expired" | "empty" | "disabled" | "error";
 
 const isTerminal = (phase: Phase) =>
-  phase === "error" || phase === "unavailable" || phase === "limited" || phase === "expired";
+  phase === "error" || phase === "unavailable" || phase === "limited" || phase === "expired" || phase === "empty" || phase === "disabled";
 
 export default function RunningPage() {
   const router = useRouter();
@@ -156,7 +156,7 @@ export default function RunningPage() {
   const lastStage = stageIdx >= total - 1;
 
   const failed =
-    phase === "error" || phase === "unavailable" || phase === "limited" || phase === "expired";
+    phase === "error" || phase === "unavailable" || phase === "limited" || phase === "expired" || phase === "empty" || phase === "disabled";
 
   const statusText = failed
     ? phase === "limited"
@@ -170,6 +170,10 @@ export default function RunningPage() {
   const headline =
     phase === "unavailable"
       ? "Generation unavailable"
+      : phase === "empty"
+        ? "No citation-ready documents"
+        : phase === "disabled"
+          ? "Tenant generation disabled"
       : phase === "limited"
         ? "Generation limit reached"
         : phase === "error"
@@ -179,6 +183,10 @@ export default function RunningPage() {
   const subline =
     phase === "unavailable"
       ? "The report service could not be reached, so we haven't generated anything. Your documents and reports are untouched — please try again in a moment."
+      : phase === "empty"
+        ? "Finalize at least one eligible document before generating a tenant report."
+        : phase === "disabled"
+          ? "Tenant report generation is not enabled for this deployment. Sample evidence was not substituted."
       : phase === "limited"
         ? "You've reached the report generation limit for now. Please try again later."
         : phase === "error"
@@ -206,7 +214,7 @@ export default function RunningPage() {
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
           <div style={{ width: "100%", maxWidth: 680 }}>
             <div style={{ fontFamily: mono, fontSize: 12, letterSpacing: ".2em", color: "rgba(245,245,243,.4)", textTransform: "uppercase" }}>
-              Multi-agent workflow
+              Multi-agent workflow · Tenant corpus
             </div>
             <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-.02em", margin: "12px 0 4px" }}>{headline}</h2>
             <div style={{ fontFamily: mono, fontSize: 13, color: "rgba(245,245,243,.55)", lineHeight: 1.5 }}>{subline}</div>
@@ -236,12 +244,20 @@ export default function RunningPage() {
                 <div style={{ fontSize: 13.5, color: "rgba(245,245,243,.7)", lineHeight: 1.6 }}>
                   {phase === "unavailable"
                     ? "Nothing was generated and nothing was saved. This is a temporary server problem, not a problem with your documents."
+                    : phase === "empty"
+                      ? "No eligible tenant evidence was available. Nothing was generated or saved."
+                    : phase === "disabled"
+                      ? "Nothing was generated or saved, and the sample corpus was not used."
                     : phase === "limited"
                       ? "You've generated a lot of reports recently. The limit resets automatically."
                       : "Something went wrong while generating this report."}
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={retry} style={btnPrimary}>Try again</button>
+                  {phase === "empty" ? (
+                    <button onClick={() => router.push("/documents")} style={btnPrimary}>Go to Documents</button>
+                  ) : (
+                    <button onClick={retry} style={btnPrimary}>Try again</button>
+                  )}
                   <button onClick={() => router.push("/workspace")} style={btnGhost}>Back to workspace</button>
                 </div>
               </div>

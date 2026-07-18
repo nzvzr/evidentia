@@ -12,7 +12,7 @@ from app.core.ratelimit import (
     RateLimiter,
     RateLimitRule,
 )
-from tests.conftest import VALID_PASSWORD, register
+from tests.conftest import VALID_PASSWORD, register, seed_finalized_document
 
 RATE_LIMITED = 429
 
@@ -300,7 +300,7 @@ def test_refresh_abuse_is_capped_per_ip(client, alice, monkeypatch):
 GEN = {"market": "EMEA", "persona": "Support Agent"}
 
 
-def test_generation_is_capped_per_user(client, alice, monkeypatch):
+def test_generation_is_capped_per_user(client, alice, monkeypatch, tenant_generation):
     s = get_settings()
     monkeypatch.setattr(s, "rl_generate_user_limit", 2)
 
@@ -313,7 +313,9 @@ def test_generation_is_capped_per_user(client, alice, monkeypatch):
     assert int(res.headers["Retry-After"]) > 0
 
 
-def test_generation_is_capped_per_tenant_across_members(client, alice, monkeypatch):
+def test_generation_is_capped_per_tenant_across_members(
+    client, alice, monkeypatch, tenant_generation
+):
     """One organization cannot burn the shared LLM budget by fanning out across
     its own members — the tenant budget is separate from the per-user one."""
     s = get_settings()
@@ -333,11 +335,14 @@ def test_generation_is_capped_per_tenant_across_members(client, alice, monkeypat
     assert res.status_code == RATE_LIMITED
 
 
-def test_generation_budget_is_not_shared_between_tenants(client, alice, bob, monkeypatch):
+def test_generation_budget_is_not_shared_between_tenants(
+    client, alice, bob, monkeypatch, tenant_generation, session_factory
+):
     s = get_settings()
     monkeypatch.setattr(s, "rl_generate_tenant_limit", 1)
     monkeypatch.setattr(s, "rl_generate_user_limit", 1000)
     monkeypatch.setattr(s, "rl_generate_ip_limit", 1000)
+    seed_finalized_document(bob, session_factory, monkeypatch, filename="bob.md")
 
     assert alice.post("/api/generate-workflow", json=GEN).status_code == 200
     assert alice.post("/api/generate-workflow", json=GEN).status_code == RATE_LIMITED

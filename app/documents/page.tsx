@@ -64,7 +64,11 @@ function stageLabel(doc: TenantDocument): string {
       // Distinguish the M2 transitional state (parsed only) from the final
       // M3 citation-ready state — a transitional document is never labelled
       // generation-ready.
-      return ing.finalized ? "Citation-ready" : "Awaiting finalization";
+      return ing.generationEligible
+        ? "Citation-ready"
+        : ing.finalized
+          ? "Finalized · unavailable"
+          : "Awaiting finalization";
     case "failed":
       return ing.stageKind === "finalize" ? "Finalization failed" : "Failed";
     default:
@@ -349,8 +353,10 @@ export default function DocumentsPage() {
                         style={failed ? failedBadge : processing ? processingBadge : statusBadge}
                         title={
                           ing?.stage === "ready"
-                            ? ing.finalized
-                              ? "Parsed, anchored and classified with stable citation identities. Report generation still uses the sample corpus until a later release."
+                            ? ing.generationEligible
+                              ? "Citation-ready and available for tenant generation."
+                              : ing.finalized
+                                ? "Finalized, but the current version does not pass the generation eligibility gate."
                               : "Parsed and split into sections. Finalize to compute stable citation identities."
                             : undefined
                         }
@@ -429,8 +435,9 @@ export default function DocumentsPage() {
               <span style={{ fontFamily: mono, fontSize: 10.5, color: "var(--accent)", letterSpacing: ".08em", fontWeight: 600 }}>DOCUMENT INGESTION</span>
               <span style={{ fontSize: 13, color: "var(--ink2)" }}>
                 Uploaded documents are stored for your organization and parsed into sections.
-                Report generation still uses the sample corpus above; analysis of your own
-                documents arrives in a later release.
+                {corpus?.generationEnabled
+                  ? " Citation-ready documents are available to tenant report generation."
+                  : " Tenant report generation is disabled; the authenticated route does not substitute sample evidence."}
               </span>
             </>
           ) : (
