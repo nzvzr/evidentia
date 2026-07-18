@@ -1,0 +1,92 @@
+{
+  "finalizationTarget": "cft1:85163b606e06c1b681ebdfe03199b9022e3384cd297ffdc20ec79f414f5b805b",
+  "fixture": "duplicates",
+  "manifestSha256": "f9b5a1cd346416ab76e62641764e4ada77f4f1c02322157f53dd3ef3b1a55bd9",
+  "sections": [
+    {
+      "anchorId": "bkr5dernwcgi",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "Operations",
+      "citationId": "GLD-bkr5dernwcgi",
+      "classificationSignature": "aac361f65f170d4e069d4fd3b915c1cca18a4e1326eaf2cbdbeb130b1b9031e5",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Runbook",
+        "Checklist"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations"
+      ],
+      "ordinal": 0,
+      "textSha256": "c1f9a6cc471a76ae5efc0b4026eb27fac20bdaa27e509e486c2b035aa27e5ccf",
+      "title": "Checklist",
+      "topics": []
+    },
+    {
+      "anchorId": "bkr5dernwcgi-2",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "Operations",
+      "citationId": "GLD-bkr5dernwcgi-2",
+      "classificationSignature": "a6ee318b8c29f7e30c76c0d7fc2f8d200d8dee706e427acd340f8b93d93c0c6f",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Runbook",
+        "Checklist"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations"
+      ],
+      "ordinal": 1,
+      "textSha256": "c1f9a6cc471a76ae5efc0b4026eb27fac20bdaa27e509e486c2b035aa27e5ccf",
+      "title": "Checklist",
+      "topics": []
+    },
+    {
+      "anchorId": "bkr5dernwcgi-3",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "Operations",
+      "citationId": "GLD-bkr5dernwcgi-3",
+      "classificationSignature": "09b66274263a3873c47bf69258c51c83a606a663f4731c8a8c61732f3fe187d2",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Runbook",
+        "Checklist"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations"
+      ],
+      "ordinal": 2,
+      "textSha256": "c1f9a6cc471a76ae5efc0b4026eb27fac20bdaa27e509e486c2b035aa27e5ccf",
+      "title": "Checklist",
+      "topics": []
+    }
+  ],
+  "versionClassificationSignature": "c7cfe9c96fc86813399e3caa7011b35a03388e1540d6f6f06bb6fb4f17f7dbfc"
+}

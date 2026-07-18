@@ -1,0 +1,60 @@
+{
+  "finalizationTarget": "cft1:85163b606e06c1b681ebdfe03199b9022e3384cd297ffdc20ec79f414f5b805b",
+  "fixture": "split",
+  "manifestSha256": "d026d3845c31c4b84b0f8afa395e4a697d40ace1cdd07c68acd87f8b30bcee95",
+  "sections": [
+    {
+      "anchorId": "nfehjrof75sc.p1",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "General",
+      "citationId": "GLD-nfehjrof75sc.p1",
+      "classificationSignature": "1d60b361c8387c2aa07990c9925af7784c36a26d15f77f4d63d159eaf9d251de",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Retention Schedule",
+        "Record Classes"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 0,
+      "textSha256": "d3fa03412f6c050de463ff8863a386945f6963003a666a268c3d705522321301",
+      "title": "Record Classes",
+      "topics": []
+    },
+    {
+      "anchorId": "nfehjrof75sc.p2",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "General",
+      "citationId": "GLD-nfehjrof75sc.p2",
+      "classificationSignature": "bd0ac75f05f693de9a09bb4975be54e9f0ff36ea0215e91ae0da4238ccafa5e4",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Retention Schedule",
+        "Record Classes"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 1,
+      "textSha256": "bb2d55e6ad4c7963bed37d1f6ce1a19e5d50540fd6430d78e1cf6d454d913f62",
+      "title": "Record Classes",
+      "topics": []
+    }
+  ],
+  "versionClassificationSignature": "95b2c43f84adde7900b936468d739ea6cf0c1dd805269599daa4db2ee31951e0"
+}

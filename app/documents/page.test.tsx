@@ -31,6 +31,9 @@ function ingestion(overrides: Record<string, unknown> = {}) {
   return {
     status: "processing",
     stage: "pending",
+    stageKind: "ingest",
+    identity: null,
+    finalized: false,
     versionNo: 1,
     filename: "policy.md",
     detectedFormat: "markdown",
@@ -282,7 +285,9 @@ describe("DocumentsPage", () => {
       {
         documents: [
           tenantDoc({
-            ingestion: ingestion({ stage: "ready", status: "ready", sectionCount: 7 }),
+            ingestion: ingestion({
+              stage: "ready", status: "ready", sectionCount: 7, identity: "transitional",
+            }),
           }),
         ],
         tenantCorpus: CORPUS_CONFIG,
@@ -292,7 +297,7 @@ describe("DocumentsPage", () => {
     await flush();
 
     expect(screen.getByText("YOUR DOCUMENTS")).toBeTruthy();
-    expect(screen.getByText("Processed")).toBeTruthy();
+    expect(screen.getByText("Awaiting finalization")).toBeTruthy();
     const row = screen.getByText("policy").closest("div") as HTMLElement;
     const meta = within(row.parentElement as HTMLElement);
     expect(meta.getByText(/policy\.md · 1\.5 KB · uploaded Jul 16, 2026 · v1 · 7 sections/)).toBeTruthy();
@@ -301,17 +306,23 @@ describe("DocumentsPage", () => {
     expect(within(row.parentElement as HTMLElement).queryByText(/%/)).toBeNull();
   });
 
-  it("shows the pre-analysis meaning of Processed honestly", async () => {
+  it("shows the pre-finalization meaning of a parsed document honestly", async () => {
     listResponses = [
       {
-        documents: [tenantDoc({ ingestion: ingestion({ stage: "ready", status: "ready", sectionCount: 2 }) })],
+        documents: [
+          tenantDoc({
+            ingestion: ingestion({
+              stage: "ready", status: "ready", sectionCount: 2, identity: "transitional",
+            }),
+          }),
+        ],
         tenantCorpus: CORPUS_CONFIG,
       },
     ];
     renderStrict();
     await flush();
-    const badge = screen.getByText("Processed");
-    expect(badge.getAttribute("title")).toMatch(/Not yet used for report generation/);
+    const badge = screen.getByText("Awaiting finalization");
+    expect(badge.getAttribute("title")).toMatch(/Finalize to compute stable citation identities/);
     expect(screen.getByText(/Report generation still uses the sample corpus/)).toBeTruthy();
   });
 
@@ -437,7 +448,7 @@ describe("DocumentsPage", () => {
       vi.advanceTimersByTime(POLL_INTERVAL_MS);
     });
     await flush();
-    expect(screen.getByText("Processed")).toBeTruthy();
+    expect(screen.getByText("Awaiting finalization")).toBeTruthy();
 
     // terminal: no further polling
     const settled = fetchMock.mock.calls.length;
@@ -485,6 +496,175 @@ describe("DocumentsPage", () => {
       vi.advanceTimersByTime(POLL_INTERVAL_MS * 10);
     });
     expect(fetchMock.mock.calls.length).toBe(afterMount); // interval cleared
+  });
+
+  // ------------------------------------------------------------------ //
+  // M3 finalization states
+  // ------------------------------------------------------------------ //
+
+  it("offers Finalize on a parsed transitional document and reports the start", async () => {
+    listResponses = [
+      {
+        documents: [
+          tenantDoc({
+            ingestion: ingestion({
+              stage: "ready", status: "ready", sectionCount: 3, identity: "transitional",
+            }),
+          }),
+        ],
+        tenantCorpus: CORPUS_CONFIG,
+      },
+    ];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/documents" && (!init || !init.method)) return json(200, listBody());
+      if (url === "/api/documents/doc-1/finalize" && init?.method === "POST") {
+        return json(202, { documentId: "doc-1", versionNo: 2, created: true });
+      }
+      throw new Error(`unmocked: ${init?.method} ${url}`);
+    });
+
+    renderStrict();
+    await flush();
+    fireEvent.click(screen.getByText("Finalize"));
+    await flush();
+
+    const posts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/finalize"));
+    expect(posts).toHaveLength(1);
+    expect(
+      screen.getByText("Finalization started — anchors and classification are being computed."),
+    ).toBeTruthy();
+  });
+
+  it("labels the M3 stages honestly and keeps polling through them", async () => {
+    vi.useFakeTimers();
+    const anchoring = tenantDoc({
+      ingestion: ingestion({ stage: "anchoring", stageKind: "finalize", identity: "transitional" }),
+    });
+    const classifying = tenantDoc({
+      ingestion: ingestion({ stage: "classifying", stageKind: "finalize", identity: "transitional" }),
+    });
+    const final = tenantDoc({
+      ingestion: ingestion({
+        stage: "ready", status: "ready", stageKind: "finalize",
+        identity: "final", finalized: true, versionNo: 2, sectionCount: 3,
+      }),
+    });
+    listResponses = [
+      { documents: [anchoring], tenantCorpus: CORPUS_CONFIG }, // mount #1
+      { documents: [anchoring], tenantCorpus: CORPUS_CONFIG }, // mount #2
+      { documents: [classifying], tenantCorpus: CORPUS_CONFIG }, // poll 1
+      { documents: [final], tenantCorpus: CORPUS_CONFIG }, // poll 2 -> terminal
+    ];
+
+    renderStrict();
+    await flush();
+    expect(screen.getByText("Anchoring")).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(POLL_INTERVAL_MS);
+    });
+    await flush();
+    expect(screen.getByText("Classifying")).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(POLL_INTERVAL_MS);
+    });
+    await flush();
+    expect(screen.getByText("Citation-ready")).toBeTruthy();
+
+    // terminal: polling stops; no Finalize offered on a final document
+    const settled = fetchMock.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(POLL_INTERVAL_MS * 4);
+    });
+    await flush();
+    expect(fetchMock.mock.calls.length).toBe(settled);
+    expect(screen.queryByText("Finalize")).toBeNull();
+  });
+
+  it("distinguishes a citation-ready document without claiming generation use", async () => {
+    listResponses = [
+      {
+        documents: [
+          tenantDoc({
+            ingestion: ingestion({
+              stage: "ready", status: "ready", stageKind: "finalize",
+              identity: "final", finalized: true, versionNo: 2, sectionCount: 3,
+            }),
+          }),
+        ],
+        tenantCorpus: CORPUS_CONFIG,
+      },
+    ];
+    renderStrict();
+    await flush();
+    const badge = screen.getByText("Citation-ready");
+    expect(badge.getAttribute("title")).toMatch(/still uses the sample corpus/);
+    expect(screen.queryByText("Finalize")).toBeNull();
+    // the generation note remains demo-only
+    expect(screen.getByText(/Report generation still uses the sample corpus/)).toBeTruthy();
+  });
+
+  it("labels a failed finalization distinctly and allows retry", async () => {
+    listResponses = [
+      {
+        documents: [
+          tenantDoc({
+            ingestion: ingestion({
+              stage: "failed", status: "ready", stageKind: "finalize",
+              identity: "transitional", versionNo: 2,
+              errorCode: "anchoring_failed",
+              errorMessage: "Stable section identities could not be assigned.",
+            }),
+          }),
+        ],
+        tenantCorpus: CORPUS_CONFIG,
+      },
+    ];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/documents" && (!init || !init.method)) return json(200, listBody());
+      if (url === "/api/documents/doc-1/retry" && init?.method === "POST") {
+        return json(202, { retried: true });
+      }
+      throw new Error(`unmocked: ${init?.method} ${url}`);
+    });
+
+    renderStrict();
+    await flush();
+    expect(screen.getByText("Finalization failed")).toBeTruthy();
+    expect(screen.getByText("Stable section identities could not be assigned.")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Retry"));
+    await flush();
+    expect(screen.getByText("Retry started.")).toBeTruthy();
+  });
+
+  it("surfaces a typed finalize rejection", async () => {
+    listResponses = [
+      {
+        documents: [
+          tenantDoc({
+            ingestion: ingestion({
+              stage: "ready", status: "ready", identity: "transitional",
+            }),
+          }),
+        ],
+        tenantCorpus: CORPUS_CONFIG,
+      },
+    ];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/documents" && (!init || !init.method)) return json(200, listBody());
+      if (String(url).endsWith("/finalize") && init?.method === "POST") {
+        return json(409, { code: "already_final" });
+      }
+      throw new Error(`unmocked: ${init?.method} ${url}`);
+    });
+
+    renderStrict();
+    await flush();
+    fireEvent.click(screen.getByText("Finalize"));
+    await flush();
+    expect(screen.getByText("This document is already citation-ready.")).toBeTruthy();
   });
 
   // ------------------------------------------------------------------ //

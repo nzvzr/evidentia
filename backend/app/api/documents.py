@@ -35,10 +35,13 @@ from app.api.deps import CompanyContext, get_company_context, require_admin
 from app.api.limits import enforce_upload
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.db_models import Document, DocumentVersion
+from app.ingestion.sectionizer import ANCHOR_ALGO_TRANSITIONAL
+from app.models.db_models import Document, DocumentVersion, VERSION_STATUS_READY
 from app.models.schemas import DocumentCreate
 from app.repositories import documents as documents_repo
+from app.services import document_finalize as finalize_service
 from app.services import document_upload as upload_service
+from app.services.document_finalize import FinalizeRejected
 from app.services.document_upload import UploadOutcome, UploadRejected
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -60,14 +63,42 @@ def _format_label(doc: Document) -> Optional[str]:
     return None
 
 
-def _ingestion_payload(doc: Document, version: Optional[DocumentVersion]) -> Dict[str, Any]:
-    """Safe, tenant-visible ingestion state. `ready` here means "parsed and
-    sectionized" (pre-M3): honest wording belongs to the UI, the machine-
-    readable stage is exact. Never exposes storage keys, section text,
-    citation ids (M3 mints those) or queue lease details."""
+def _version_identity(version: Optional[DocumentVersion]) -> Optional[str]:
+    """"transitional" | "final" | None — safe identity metadata for a version."""
+    if version is None or not version.anchor_algo_version:
+        return None
+    return "transitional" if version.anchor_algo_version == ANCHOR_ALGO_TRANSITIONAL else "final"
+
+
+def _ingestion_payload(
+    doc: Document,
+    version: Optional[DocumentVersion],
+    current: Optional[DocumentVersion] = None,
+) -> Dict[str, Any]:
+    """Safe, tenant-visible ingestion state. `ready` alone still means only
+    "parsed and sectionized"; `identity`/`citationReady` distinguish the M2
+    transitional state from the final M3 citation-ready state. Never exposes
+    storage keys, section text, citation ids or queue lease details."""
     payload: Dict[str, Any] = {
         "status": doc.status,
         "stage": version.status if version is not None else None,
+        # Which kind of work the latest version represents — the UI uses this
+        # to say "Finalization failed" rather than a generic "Failed".
+        "stageKind": (
+            "finalize" if version is not None and version.source_version_id else "ingest"
+        )
+        if version is not None
+        else None,
+        # Identity of the CURRENT (generation-pointer) version. `finalized`
+        # means the current version is final AND ready (M3 citation-ready) —
+        # named without the word "citation" because a test pins that no
+        # citation internals ever appear in this response.
+        "identity": _version_identity(current),
+        "finalized": bool(
+            current is not None
+            and current.status == VERSION_STATUS_READY
+            and _version_identity(current) == "final"
+        ),
         "versionNo": version.version_no if version is not None else None,
         "filename": doc.original_filename,
         "detectedFormat": _format_label(doc),
@@ -81,7 +112,11 @@ def _ingestion_payload(doc: Document, version: Optional[DocumentVersion]) -> Dic
     return payload
 
 
-def _serialize(doc: Document, version: Optional[DocumentVersion] = None) -> Dict[str, Any]:
+def _serialize(
+    doc: Document,
+    version: Optional[DocumentVersion] = None,
+    current: Optional[DocumentVersion] = None,
+) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "id": doc.id,
         "companyId": doc.company_id,
@@ -95,7 +130,7 @@ def _serialize(doc: Document, version: Optional[DocumentVersion] = None) -> Dict
     # Additive, flag-gated: with the corpus off the response shape stays
     # byte-for-byte the pre-M2 one (pinned by test).
     if _corpus_enabled():
-        data["ingestion"] = _ingestion_payload(doc, version)
+        data["ingestion"] = _ingestion_payload(doc, version, current)
     return data
 
 
@@ -114,6 +149,22 @@ def _latest_versions(db: Session, company_id: str, document_ids: List[str]) -> D
     for row in rows:
         latest[row.document_id] = row  # ascending order => last write wins
     return latest
+
+
+def _current_versions(
+    db: Session, company_id: str, docs: List[Document]
+) -> Dict[str, DocumentVersion]:
+    """document_id -> its CURRENT version row (tenant-scoped bulk fetch)."""
+    version_ids = [d.current_version_id for d in docs if d.current_version_id]
+    if not version_ids:
+        return {}
+    rows = db.execute(
+        select(DocumentVersion).where(
+            DocumentVersion.company_id == company_id,
+            DocumentVersion.id.in_(version_ids),
+        )
+    ).scalars().all()
+    return {row.document_id: row for row in rows}
 
 
 def _upload_config() -> Dict[str, Any]:
@@ -137,8 +188,9 @@ def get_documents(
             latest = (
                 _latest_versions(db, ctx.company_id, [r.id for r in rows]) if corpus_on else {}
             )
+            current = _current_versions(db, ctx.company_id, rows) if corpus_on else {}
             body: Dict[str, Any] = {
-                "documents": [_serialize(r, latest.get(r.id)) for r in rows]
+                "documents": [_serialize(r, latest.get(r.id), current.get(r.id)) for r in rows]
             }
             if corpus_on:
                 body["tenantCorpus"] = _upload_config()
@@ -160,9 +212,11 @@ def get_document(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     version = None
+    current = None
     if _corpus_enabled():
         version = upload_service.latest_version(db, doc.id, ctx.company_id)
-    return _serialize(doc, version)
+        current = _current_versions(db, ctx.company_id, [doc]).get(doc.id)
+    return _serialize(doc, version, current)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -380,6 +434,98 @@ async def upload_new_version(
     if not outcome.created:
         return JSONResponse(status_code=status.HTTP_200_OK, content=body)
     return body
+
+
+@router.post("/{document_id}/finalize", status_code=status.HTTP_202_ACCEPTED)
+def finalize_document_endpoint(
+    document_id: str,
+    request: Request,
+    ctx: CompanyContext = Depends(get_company_context),
+    db: Session = Depends(get_db),
+):
+    """Trigger M3 finalization of the document's current transitional version:
+    a NEW immutable successor version is re-ingested from the retained source
+    bytes with final anchors, internal citation identities and deterministic
+    classification, pinned to the COMPLETE finalization target captured now.
+    Contract (pinned by tests): first trigger 202 (created); repeat while the
+    successor is live or failed adopts/retries it (200, adopted/retried); a
+    document whose current version is ALREADY final is 409 `already_final`
+    (deliberate: nothing to finalize is a client-visible state, not a no-op);
+    no processed version 409 `no_ready_version`; unknown/foreign 404."""
+    _require_corpus_enabled()
+    enforce_upload(request, user_id=ctx.user_id, company_id=ctx.company_id)
+
+    doc = documents_repo.get_document(db, document_id, ctx.company_id)
+    if not doc or doc.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    try:
+        outcome = finalize_service.finalize_document(db, document=doc, user_id=ctx.user_id)
+    except FinalizeRejected as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from None
+
+    body = {
+        "documentId": doc.id,
+        "sourceVersionNo": outcome.source_version.version_no,
+        "versionId": outcome.successor.id,
+        "versionNo": outcome.successor.version_no,
+        "stage": outcome.successor.status,
+        "created": outcome.created,
+        "adopted": outcome.adopted,
+        "alreadyFinal": outcome.already_final,
+        "retried": outcome.retried,
+    }
+    if not outcome.created:
+        return JSONResponse(status_code=status.HTTP_200_OK, content=body)
+    return body
+
+
+@router.get("/{document_id}/versions")
+def list_document_versions(
+    document_id: str,
+    ctx: CompanyContext = Depends(get_company_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Safe version history: transitional vs final identity, stage and error
+    metadata only — never section text, citation ids, blob keys or manifests."""
+    _require_corpus_enabled()
+
+    doc = documents_repo.get_document(db, document_id, ctx.company_id)
+    if not doc or doc.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    rows = db.execute(
+        select(DocumentVersion)
+        .where(
+            DocumentVersion.document_id == doc.id,
+            DocumentVersion.company_id == ctx.company_id,
+        )
+        .order_by(DocumentVersion.version_no.asc())
+    ).scalars().all()
+    by_id = {row.id: row for row in rows}
+    versions = [
+        {
+            "versionNo": row.version_no,
+            "stage": row.status,
+            "identity": _version_identity(row),
+            "anchorAlgoVersion": row.anchor_algo_version,
+            "sectionCount": row.section_count,
+            "current": row.id == doc.current_version_id,
+            "finalizedFromVersionNo": (
+                by_id[row.source_version_id].version_no
+                if row.source_version_id and row.source_version_id in by_id
+                else None
+            ),
+            "errorCode": row.error_code,
+            "createdAt": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+    return {"documentId": doc.id, "versions": versions}
 
 
 @router.post("/{document_id}/retry", status_code=status.HTTP_202_ACCEPTED)

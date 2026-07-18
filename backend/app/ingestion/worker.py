@@ -37,8 +37,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.ingestion.errors import ERROR_INTERNAL, ERROR_STALE_ABANDONED, IngestionError
-from app.ingestion.pipeline import mark_version_failed, process_version
-from app.models.db_models import JOB_STATE_FAILED, IngestionJob
+from app.ingestion.pipeline import (
+    OwnershipLost,
+    mark_version_failed,
+    process_finalization,
+    process_version,
+)
+from app.models.db_models import JOB_OPERATION_FINALIZE, JOB_STATE_FAILED, IngestionJob
 from app.services.job_queue import DatabaseJobQueue, JobQueue
 
 logger = logging.getLogger("evidentia.ingestion.worker")
@@ -157,13 +162,15 @@ class IngestionWorker:
 
     # -- one unit of work -------------------------------------------------------- #
 
-    def process_one(self) -> bool:
+    def process_one(self, version_ids=None) -> bool:
         """Claim and process a single job. Returns True when a job was found.
         Public so tests (and the smoke harness) can drive the worker
-        deterministically without threads."""
+        deterministically without threads. ``version_ids`` restricts claiming
+        to jobs for those versions (bounded inline CLI processing — never the
+        global queue)."""
         db = self._session_factory()
         try:
-            job = self._queue.claim(db)
+            job = self._queue.claim(db, version_ids=version_ids)
             if job is None:
                 return False
             db.commit()  # ownership durable before any work
@@ -174,18 +181,42 @@ class IngestionWorker:
 
     def _execute(self, db: Session, job: IngestionJob) -> None:
         job_id, company_id, version_id = job.id, job.company_id, job.version_id
+        operation = job.operation
         attempt = job.attempts
         started = time.perf_counter()
         logger.info(
-            "ingestion claimed job=%s company=%s document=%s version=%s attempt=%d",
-            job_id, company_id, job.document_id, version_id, attempt,
+            "ingestion claimed job=%s operation=%s company=%s document=%s version=%s attempt=%d",
+            job_id, operation, company_id, job.document_id, version_id, attempt,
         )
+
+        def _stage_heartbeat() -> bool:
+            """Refresh ownership between finalization stages; False aborts the
+            holder (the stale sweep reassigned the job)."""
+            alive = self._queue.heartbeat(db, job_id)
+            db.commit()
+            return alive
+
         try:
             if not self._queue.heartbeat(db, job_id):
                 db.rollback()
                 return  # ownership lost to the stale sweep; do no work
             db.commit()
-            process_version(db, version_id=version_id, company_id=company_id)
+            if operation == JOB_OPERATION_FINALIZE:
+                process_finalization(
+                    db,
+                    version_id=version_id,
+                    company_id=company_id,
+                    heartbeat=_stage_heartbeat,
+                )
+            else:
+                process_version(db, version_id=version_id, company_id=company_id)
+        except OwnershipLost:
+            db.rollback()
+            logger.warning(
+                "ingestion ownership lost mid-run job=%s company=%s version=%s attempt=%d",
+                job_id, company_id, version_id, attempt,
+            )
+            return  # the new holder owns the job; touch nothing
         except IngestionError as error:
             db.rollback()
             self._handle_failure(db, job_id, company_id, version_id, error, attempt)

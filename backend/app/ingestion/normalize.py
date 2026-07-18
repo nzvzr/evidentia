@@ -33,6 +33,10 @@ from app.ingestion.errors import (
     IngestionError,
 )
 
+# Versioned with the ingestion engine: the normalization rules participate in
+# M3 manifests/engine_versions, so a behavior change here must bump this.
+NORMALIZER_VERSION = "m2.1"
+
 _UTF8_BOM = b"\xef\xbb\xbf"
 
 # Control characters except \t (0x09) and \n (0x0a); \r is gone before this

@@ -48,17 +48,25 @@ function fromDemo(doc: DemoDoc): DocDetail {
 
 /** Honest processing-state label for a tenant document (real backend state). */
 function stageLabel(doc: TenantDocument): string {
-  switch (doc.ingestion?.stage) {
+  const ing = doc.ingestion;
+  switch (ing?.stage) {
     case "pending":
       return "Queued";
     case "extracting":
       return "Extracting";
     case "sectioning":
       return "Sectioning";
+    case "anchoring":
+      return "Anchoring";
+    case "classifying":
+      return "Classifying";
     case "ready":
-      return "Processed";
+      // Distinguish the M2 transitional state (parsed only) from the final
+      // M3 citation-ready state — a transitional document is never labelled
+      // generation-ready.
+      return ing.finalized ? "Citation-ready" : "Awaiting finalization";
     case "failed":
-      return "Failed";
+      return ing.stageKind === "finalize" ? "Finalization failed" : "Failed";
     default:
       return doc.ingestion?.status === "processing" ? "Processing" : "Stored";
   }
@@ -82,6 +90,7 @@ export default function DocumentsPage() {
     uploading,
     uploadFile,
     uploadNewVersion,
+    finalize,
     retry,
     addLegacyFile,
     remove,
@@ -181,6 +190,14 @@ export default function DocumentsPage() {
     const result = await retry(documentId);
     if (!result.ok) setUploadError(result.error ?? "Retry failed.");
     else setUploadNotice("Retry started.");
+  };
+
+  const onFinalize = async (documentId: string) => {
+    setUploadError(null);
+    setUploadNotice(null);
+    const result = await finalize(documentId);
+    if (!result.ok) setUploadError(result.error ?? "Finalization failed to start.");
+    else setUploadNotice("Finalization started — anchors and classification are being computed.");
   };
 
   return (
@@ -320,6 +337,8 @@ export default function DocumentsPage() {
               const label = stageLabel(doc);
               const processing = isProcessing(doc);
               const failed = ing?.stage === "failed";
+              const awaitingFinalization =
+                ing?.stage === "ready" && ing.identity === "transitional";
               return (
                 <div key={doc.id} style={{ ...docRow, cursor: "default", borderBottom: i < documents.length - 1 ? "1px solid var(--line)" : "none" }}>
                   <span style={{ flex: 1, minWidth: 0 }}>
@@ -330,7 +349,9 @@ export default function DocumentsPage() {
                         style={failed ? failedBadge : processing ? processingBadge : statusBadge}
                         title={
                           ing?.stage === "ready"
-                            ? "Parsed and split into sections. Not yet used for report generation."
+                            ? ing.finalized
+                              ? "Parsed, anchored and classified with stable citation identities. Report generation still uses the sample corpus until a later release."
+                              : "Parsed and split into sections. Finalize to compute stable citation identities."
                             : undefined
                         }
                       >
@@ -359,6 +380,9 @@ export default function DocumentsPage() {
                   <span style={{ display: "flex", gap: 8, flex: "none" }}>
                     {failed && (
                       <button onClick={() => onRetry(doc.id)} style={ghostBtn}>Retry</button>
+                    )}
+                    {awaitingFinalization && (
+                      <button onClick={() => onFinalize(doc.id)} style={ghostBtn}>Finalize</button>
                     )}
                     {!processing && (
                       <button

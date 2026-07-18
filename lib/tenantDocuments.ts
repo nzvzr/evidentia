@@ -23,6 +23,12 @@ import type { UploadedDoc } from "./types";
 export interface IngestionState {
   status: string;
   stage: string | null;
+  /** M3: what the latest version's work is — "ingest" or "finalize". */
+  stageKind: string | null;
+  /** M3: identity of the current version — "transitional" | "final" | null. */
+  identity: string | null;
+  /** M3: current version is final AND ready (citation-ready). */
+  finalized: boolean;
   versionNo: number | null;
   filename: string | null;
   detectedFormat: string | null;
@@ -71,7 +77,13 @@ interface BackendDoc {
 }
 
 /** Ingestion stages that mean "still processing" — the only states we poll for. */
-export const ACTIVE_STAGES = new Set(["pending", "extracting", "sectioning"]);
+export const ACTIVE_STAGES = new Set([
+  "pending",
+  "extracting",
+  "sectioning",
+  "anchoring",
+  "classifying",
+]);
 
 export const POLL_INTERVAL_MS = 2_500;
 
@@ -80,6 +92,9 @@ function toIngestion(raw: Partial<IngestionState> | null | undefined): Ingestion
   return {
     status: String(raw.status ?? ""),
     stage: raw.stage != null ? String(raw.stage) : null,
+    stageKind: raw.stageKind != null ? String(raw.stageKind) : null,
+    identity: raw.identity != null ? String(raw.identity) : null,
+    finalized: Boolean(raw.finalized),
     versionNo: typeof raw.versionNo === "number" ? raw.versionNo : null,
     filename: raw.filename != null ? String(raw.filename) : null,
     detectedFormat: raw.detectedFormat != null ? String(raw.detectedFormat) : null,
@@ -141,6 +156,11 @@ function uploadErrorMessage(status: number, code: string | undefined): string {
       return "Too many uploads. Please try again later.";
     case "version_not_failed":
       return "Only a failed document can be retried.";
+    case "not_finalizable":
+    case "no_ready_version":
+      return "This document is not ready to be finalized yet.";
+    case "already_final":
+      return "This document is already citation-ready.";
     case "backend_unavailable":
       return "Upload is unavailable right now. Please try again later.";
     default:
@@ -300,6 +320,22 @@ export function useTenantDocuments() {
     [parseUploadResponse],
   );
 
+  /** Trigger M3 finalization of a parsed (transitional) document. Idempotent:
+   * repeats adopt the live finalization instead of duplicating it. */
+  const finalize = useCallback(
+    async (documentId: string): Promise<UploadResult> => {
+      try {
+        const res = await fetch(`/api/documents/${encodeURIComponent(documentId)}/finalize`, {
+          method: "POST",
+        });
+        return await parseUploadResponse(res);
+      } catch {
+        return { ok: false, error: "Finalization is unavailable right now. Please try again later." };
+      }
+    },
+    [parseUploadResponse],
+  );
+
   /** Retry a failed ingestion (reuses the stored bytes; no duplicates). */
   const retry = useCallback(
     async (documentId: string): Promise<UploadResult> => {
@@ -373,6 +409,7 @@ export function useTenantDocuments() {
     refresh,
     uploadFile,
     uploadNewVersion,
+    finalize,
     retry,
     addLegacyFile,
     remove,

@@ -1,6 +1,6 @@
 # Evidentia — Project State
 
-_Concise snapshot. Update after meaningful changes. Last updated: 2026-07-16._
+_Concise snapshot. Update after meaningful changes. Last updated: 2026-07-18._
 
 ## Summary
 
@@ -8,6 +8,197 @@ Persona-aware documentation agent. Next.js frontend + Python FastAPI backend.
 Deterministic-first pipeline; optional LLM refinement layered on top.
 **Authenticated and multi-tenant**: every resource belongs to an organization,
 and every query is tenant-scoped.
+
+## M3 implemented + blocker-corrected (verified 2026-07-18, diff uncommitted)
+
+Everything in the §12 M3 gate, honoring the binding M2→M3 lifecycle contract
+(transitional versions immutable; finalization = re-ingestion into a NEW
+successor version). A first review returned BLOCK with seven blockers, a
+second focused review returned two blockers, and a final pass returned four
+narrow commit-blocking corrections; all are corrected in place (M3 never
+shipped, so the frozen algorithms/migration/fixtures stay coherent). Full
+decisions text + per-blocker detail: `DECISIONS.md` 2026-07-17 ("M3
+pre-release blocker corrections") and the two 2026-07-18 entries ("M3 final
+blocker corrections", "M3 final four narrow commit-blocking corrections").
+
+**Final four corrections (2026-07-18, round 3):** (1) the M3→M2 downgrade
+REFUSES when a successor's source version has zero `document_blobs` rows
+(was: silently skipped → byte-unresolvable successor); every successor needs
+exactly one safely resolvable source blob (lineage, DB-backed data, size +
+`content_sha256` proven). (2) Successors that already own a blob are
+preflighted, not excluded: accepted only as an exact safe equivalent of the
+source binding (then idempotent), never overwritten or deleted; the whole
+materialization plan is built globally before any insert. (3) `downgrade()`
+is exactly `_preflight_downgrade` → `_materialize_successor_blobs` →
+`_apply_m2_schema_downgrade`, proven by executing the REAL `downgrade()` with
+a sentinel preflight + interception of both phases, all `op.*` mutation entry
+points and all SQL (zero mutating statements on refusal), plus an AST
+supplement. (4) `validate_anchor_provenance` now receives the row's CURRENT
+`anchor_id` and enforces the frozen decision SEMANTICS (self-lineage equality
+for unchanged/heading-kept/reattached/inherited-*; similarity exactly 1.0 for
+inherited-exact; finite 0.8 ≤ s ≤ 1.0 for inherited-similar;
+`{parent}.p1` structure for split-lineage; typed reasons for every
+violation); eligibility passes the anchor and still requires exact manifest
+reconstruction in addition. Goldens validate unchanged — no manifest identity
+change, `cft1` untouched.
+
+**Final correction (2026-07-18): canonical anchor grammar, strict.** One
+parser (`ANCHOR_GRAMMAR_RE`/`is_canonical_anchor`) now defines
+permanent-anchor structure everywhere: slug 12..31 lowercase ASCII base36,
+duplicate suffix >= 2 in canonical decimal (no `-0`/`-1`/leading zeros — the
+first occurrence is always the bare slug), split part >= 1 canonical. The old
+`-\d+`/`\.p\d+` laxness let split-lineage provenance accept malformed parents
+(`slug-1`, `slug-01`); a follow-up strictness pass replaced `\d` with ASCII
+`[0-9]` (Python `\d` admitted Unicode digits, int()-converted: `-2٢`→22) and
+`$` with `\A…\Z` + `fullmatch()` (`$` admitted a trailing newline that the
+parser silently discarded) — the parser validates a stored identifier and
+never repairs one. Malformed forms map to the never-matching sentinel and
+reject before the split relationship comparison; eligibility's divergent
+private regex was replaced by the shared predicate; a parametrized test pins
+predicate/parser agreement over the full valid+malformed corpus. Generation
+already emitted only canonical forms (untouched); `ANCHOR_ALGO_VERSION`
+unchanged; goldens byte-for-byte stable. Focused suites 249 passed; full
+SQLite 754 passed / 11 skipped.
+
+**Two final corrections (2026-07-18):** (1) **eligibility binds
+`engine_versions` to the ONE pinned complete target** — a hybrid assembled from
+two supported targets (Markdown pinned + supported TXT parser fields) is now
+rejected: the persisted projection is reconstructed via
+`target_from_engine_versions`, its digest must equal the pinned digest, and it
+must deep-equal the registered projection with type-sensitive `canonical_json`
+(thresholds/weights bound); **anchor provenance is validated against the frozen
+decision contract AND hashed into the manifest** (`anchorProvenance`), so a
+post-manifest tamper fails `manifest_mismatch`. (2) **The downgrade is
+PREFLIGHT-FIRST** — every refusal check runs as pure SELECTs before any DDL,
+then successor blobs are materialized while lineage exists, then the M2 DDL, so
+a refusal leaves the complete M3 schema untouched regardless of DDL rollback.
+Manifest identity changed → goldens regenerated (only `manifestSha256` +
+`anchorProvenance`; all other identity surfaces byte-identical).
+
+- **Anchor algorithm `heading-path-v1`** (`app/ingestion/anchors.py`):
+  identity is the FULL canonical heading path (`heading_path_digest`, full
+  sha1); the DISPLAY slug is **12 base36 chars** (corrected from an unsafe
+  5-char slug that collided and silently mis-transferred anchors), extended
+  deterministically in 4-char steps from each heading's own digest only when
+  distinct canonical paths collide, and never reusing a retired prior anchor
+  base of a different heading. Duplicate suffixes (`slug-2`, document order),
+  split parts (`slug.p1`), constants frozen with the version.
+  **Inheritance `content-match-v1`**: exact re-attachment inside duplicate
+  groups (grouped by full digest) before renumbering; disappeared anchors
+  matched exact-hash first then token-set Jaccard ≥ 0.8 under the §7.3
+  tie-break; one-to-one both directions; ambiguous/unsafe ⇒ mint; guarded
+  pass deterministically capped at 250k pairs. Pure functions, no DB/clock
+  input; provenance (`anchor_provenance`) persisted per section. ~62-bit
+  slug; per-document birthday risk ≈ n(n−1)/2^63.04.
+- **Citation identity**: prefix minted at first finalization from the title's
+  significant initials (3–5 chars, consonant-padded), tenant-unique via the
+  existing unique index (SAVEPOINT retry, race-verified); immutable
+  thereafter; `citation_id = {prefix}-{anchor}`. Final ids are still
+  **internal** — no API exposes citation ids, section text or manifests.
+- **Domain module framework** (`app/modules/loader.py` +
+  `modules/compliance/1.0.0/*.json`): validated, digested, fail-closed data
+  packs. Module #1 `compliance@1.0.0`: the frozen 8-category taxonomy +
+  `General` fallback, 28 topics, 4 market facets, 7 persona needle sets,
+  weighted category signatures with exclusions. Classifier engine `m3.1`
+  executes packs generically (a test pins that engine sources contain no
+  taxonomy label literals), full-text scoring, matched rule ids, injection
+  flags, canonical per-section + version-level signatures.
+- **Final manifest `m3.1`** (`app/ingestion/manifest.py`): canonical JSON
+  (engine/module versions + ordered sections with anchors, citation ids,
+  hashes, classification outputs, signatures) → `manifest_sha256`;
+  `engine_versions` persisted on the version row. M2 manifests untouched.
+- **CompleteFinalizationTarget** (`app/ingestion/finalization_target.py`):
+  `finalization_engine` is now the COMPLETE target digest `cft1:<sha256>`
+  over parser/normalizer/sectionizer/anchor/inheritance/classifier/
+  section-signature/module(id+version+digest+signatureVersion)/manifest/
+  thresholds/weights (corrected from a bare anchor-version label). Captured
+  at trigger; the worker recomputes and REFUSES a pinned target it cannot
+  reproduce (`unsupported_finalization_target`, fail closed); one builder
+  serves trigger/CLI/worker/eligibility. Column widened 40→80.
+- **Finalization** (`services/document_finalize.py` + pipeline
+  `process_finalization`): eligible = ready `pre-m3-transitional` current
+  versions only. Successor row (version N+1, same `content_sha256`,
+  `source_version_id`, `finalization_engine`=complete target) reuses the
+  retained blob (no copy) and runs `pending → extracting → sectioning →
+  anchoring → classifying → ready` with per-stage heartbeats (`OwnershipLost`
+  abort). One successor per (source, COMPLETE target) is DB-unique — changing
+  ANY load-bearing component creates a distinct successor; one live job per
+  version; failed successors retry into the SAME row. Sections + identity +
+  signatures + manifest + ready + pointer flip commit atomically; the flip
+  site never moves to a lower version_no (race-verified). Schema (AMENDED
+  migration `a9d2e4c7b1f3`): `document_versions.{source_version_id,
+  finalization_engine, engine_versions, classification_signature}`, the
+  one-successor unique index, a composite self-FK
+  `(source_version_id, document_id, company_id) → (id, document_id,
+  company_id)` (+ parent unique key) enforcing same-document/same-tenant
+  sources and delete-restriction in the DATABASE, plus a data-preserving
+  downgrade (materializes successor blobs / refuses rather than stranding
+  bytes or truncating prefixes); `document_sections.{anchor_provenance,
+  matched_rules, classification_signature}`, `ingestion_jobs.operation`.
+- **M4 eligibility predicate** (`services/generation_eligibility.py`, takes a
+  `Session`, NOT yet consumed): fails closed against an explicit
+  supported-target REGISTRY — the pinned complete target must be registered
+  AND every stored component match a supported value (each rejected
+  independently) — then validates PERSISTED sections (count vs manifest,
+  ordinals, final anchors/citation ids, per-section signature + anchor-algo
+  provenance, exact manifest reconstruction, version signature). Transitional
+  always rejected even when current; malformed ⇒ ineligible, never raises.
+- **API** (tenant-scoped, flag-gated): `POST /api/documents/{id}/finalize`
+  (202 create / 200 adopt / 409 typed incl. already-final / cross-tenant 404
+  — docstring pins the tested contract),
+  `GET /api/documents/{id}/versions` (transitional-vs-final identity, safe
+  metadata only), ingestion payload gains `identity`/`finalized`/`stageKind`.
+  **CLI** `scripts/finalize_documents.py`: dry-run, per-tenant/per-document,
+  bounded batches (`--limit` rejects ≤0 and >1000), resumable/idempotent
+  discovery, `--process` inline mode SCOPED to that run's successors (never
+  the global queue), count summaries, no document text in logs; refuses
+  flag-off.
+- **Frontend (minimal)**: BFF `app/api/documents/[id]/finalize`; Documents
+  page states Queued/Extracting/Sectioning/Anchoring/Classifying/"Awaiting
+  finalization"/"Citation-ready"/"Finalization failed" (+ Finalize button on
+  transitional-ready rows, Retry on failures); polling covers the new
+  stages; transitional docs are never labelled generation-ready; generation
+  picker untouched (demo-only).
+- **Classification signature** now covers the canonical `headingInput`
+  (folded heading path + title) the classifier scores against, so equal
+  outputs with different heading inputs get different signatures
+  (`SECTION_SIGNATURE_VERSION = 1`). Module `engineCompatibility` +
+  `signatureVersion` are validated by the loader AND enforced
+  (`ensure_module_compatible`, part of the complete target + eligibility).
+- **Citation prefix capacity**: candidates cover the configured tenant
+  document quota (`evidentia_tenant_max_documents`, 500), so even titles that
+  all derive `DOC` (empty/punctuation-only/non-Latin) allocate through the
+  whole quota; `documents.citation_prefix` widened 8→12.
+- **Golden fixtures** (`tests/golden/`): **17** fixtures — added merge,
+  rename+split and size-bound oscillation (base/grow/shrink) — pin ordered
+  sections, anchors, inheritance decisions, citation ids, labels, rule ids,
+  signatures, the complete-target digest and manifests. `REQUIRED_GOLDEN_CASES`
+  is asserted set-equal to the plan (no silent omission); a new integration
+  golden runs the REAL API/worker/persistence path; regeneration only via the
+  explicit reviewed command `scripts/regenerate_golden_fixtures.py`.
+- **Verification (all green, 2026-07-18 round 3 — final four corrections)**:
+  all four blockers reproduced first; backend SQLite **672 passed, 11
+  skipped**; PostgreSQL 16 migration suite (both backends) **37 passed** +
+  **23 concurrency**; `test_m3_migration.py` refusal matrix on SQLite AND
+  PostgreSQL 16 — zero-source-blob, multiple/ambiguous source blobs, corrupt
+  size/storage-key/hash metadata, NULL data, divergent pre-existing successor
+  blob (kept untouched), multiple/incomplete successor blobs, and the
+  early-valid+later-conflicting global-planning case each leave the complete
+  M3 schema, Alembic revision, VARCHAR(12) prefix, `operation`, M3 section
+  columns and `source_version_id` intact with zero inserted rows; equivalent
+  pre-existing successor blobs accepted idempotently; the two-tenant
+  M2→M3→M2→M3 round trip preserves exact source bytes; the real `downgrade()`
+  proven preflight-first via sentinel + op/SQL interception and an AST
+  supplement; goldens validate semantically UNCHANGED (no regeneration, no
+  manifest identity change); `alembic check` on fresh SQLite and PostgreSQL 16
+  head DBs = only the 4 pre-existing legacy auth drifts (zero new, none on
+  M3); `git diff --check` clean. Frontend NOT re-run (no API response/type
+  changed). Prior 2026-07-17/18 verification (seven-blocker + two-blocker
+  passes, live PostgreSQL smoke, CLI checks) stands.
+- **Explicitly not done (M4+)**: TenantCorpusProvider / generation
+  integration, report source_versions/engine_versions, claim patterns, new
+  parsers, FTS/embeddings. Report generation still reads ONLY the demo
+  corpus.
 
 ## M2 implemented — MD/TXT upload + ingestion spine (verified 2026-07-16)
 

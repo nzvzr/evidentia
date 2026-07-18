@@ -1,0 +1,83 @@
+{
+  "signatureVersion": "1.0.0",
+  "thresholds": {
+    "categoryMinScore": 3.0,
+    "topicMinSignals": 2,
+    "marketMinSignals": 2
+  },
+  "weights": {
+    "headingSignal": 2.0,
+    "bodySignal": 1.0,
+    "phrase": 2.0
+  },
+  "categories": [
+    {
+      "category": "Security",
+      "ruleId": "compliance.category.security",
+      "headingSignals": ["security", "encryption", "audit", "certifications", "access"],
+      "signals": ["encryption", "encrypted", "tls", "kms", "sso", "saml", "rbac", "mfa", "vulnerability", "audit", "pentest", "certification", "attestation", "keys"],
+      "phrases": ["access control", "audit logging", "audit log", "encryption at rest", "encryption in transit", "single sign-on", "penetration testing", "soc 2", "iso 27001", "key management", "security review"],
+      "exclusions": [
+        { "ruleId": "compliance.exclusion.security-job", "phrase": "job security" }
+      ]
+    },
+    {
+      "category": "Compliance",
+      "ruleId": "compliance.category.compliance",
+      "headingSignals": ["compliance", "residency", "sovereignty", "privacy", "regulatory", "gdpr"],
+      "signals": ["gdpr", "hipaa", "residency", "sovereignty", "sovereign", "regulated", "regulator", "privacy", "pii", "retention", "erasure", "lawful", "dpa", "consent"],
+      "phrases": ["data residency", "data sovereignty", "regulated workloads", "data protection", "right to erasure", "data processing agreement", "regional processing", "privacy obligations", "regulatory requirements"],
+      "exclusions": [
+        { "ruleId": "compliance.exclusion.style-guide", "phrase": "style guide" }
+      ]
+    },
+    {
+      "category": "API",
+      "ruleId": "compliance.category.api",
+      "headingSignals": ["api", "endpoints", "webhooks", "authentication", "reference"],
+      "signals": ["api", "endpoint", "endpoints", "webhook", "webhooks", "token", "oauth", "sdk", "pagination", "http", "json", "request", "response", "429"],
+      "phrases": ["rate limit", "rate limits", "api key", "status code", "bearer token", "requests per second", "exponential backoff"],
+      "exclusions": []
+    },
+    {
+      "category": "Reliability",
+      "ruleId": "compliance.category.reliability",
+      "headingSignals": ["sla", "uptime", "availability", "credits", "exclusions"],
+      "signals": ["sla", "uptime", "availability", "downtime", "outage", "credit", "credits", "rto", "rpo", "failover", "redundancy", "maintenance"],
+      "phrases": ["service level", "uptime commitment", "service credits", "multi-region failover", "monthly uptime", "disaster recovery", "planned maintenance"],
+      "exclusions": []
+    },
+    {
+      "category": "Deployment",
+      "ruleId": "compliance.category.deployment",
+      "headingSignals": ["deployment", "migration", "topology", "rollback", "environments"],
+      "signals": ["deployment", "deploy", "migration", "migrate", "topology", "rollback", "blue-green", "cluster", "provisioning", "staging", "cutover", "infrastructure"],
+      "phrases": ["deployment topology", "migration plan", "blue-green deployment", "rollback plan", "reference architecture", "migration window"],
+      "exclusions": []
+    },
+    {
+      "category": "Operations",
+      "ruleId": "compliance.category.operations",
+      "headingSignals": ["incident", "escalation", "on-call", "runbook", "severity", "operations"],
+      "signals": ["incident", "incidents", "on-call", "oncall", "escalation", "escalate", "severity", "sev1", "runbook", "postmortem", "paging", "bridge", "monitoring", "alerting"],
+      "phrases": ["incident response", "on-call rotation", "severity matrix", "incident commander", "status page", "escalation path"],
+      "exclusions": []
+    },
+    {
+      "category": "Pricing",
+      "ruleId": "compliance.category.pricing",
+      "headingSignals": ["pricing", "tiers", "billing", "overage", "discounts", "packaging"],
+      "signals": ["pricing", "price", "tier", "tiers", "subscription", "overage", "discount", "discounts", "billing", "invoice", "cost", "egress", "plan", "metering"],
+      "phrases": ["usage-based", "volume discount", "egress overage", "price per", "usage limits", "billing cycle", "list price"],
+      "exclusions": []
+    },
+    {
+      "category": "Enablement",
+      "ruleId": "compliance.category.enablement",
+      "headingSignals": ["onboarding", "training", "kickoff", "go-live", "adoption", "enablement"],
+      "signals": ["onboarding", "training", "kickoff", "go-live", "adoption", "enablement", "tutorial", "workshop", "curriculum", "ramp"],
+      "phrases": ["customer onboarding", "getting started", "go-live checklist", "training plan", "success criteria", "admin training"],
+      "exclusions": []
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "finalizationTarget": "cft1:65f0f30e138dea3019032ff0dc0a964a21d7a1f1433387568f6a84b77699d1db",
+  "fixture": "headingless",
+  "manifestSha256": "6b654efc9d8a1c745899706db8627d5ac0b8fa9e9de65562412977299f0124b5",
+  "sections": [
+    {
+      "anchorId": "e1rfxu6pkpkm",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "General",
+      "citationId": "GLD-e1rfxu6pkpkm",
+      "classificationSignature": "80eb97b88bd047f319046a0f608bc58f64e20a8076a529bbb1ce3176d21730e4",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "This plain text document has no headings at all."
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 0,
+      "textSha256": "1d42d162e9574437d31e4fba5ce5bada71778b3e4bc2e4aa39929f18b7c1d04e",
+      "title": "This plain text document has no headings at all.",
+      "topics": []
+    }
+  ],
+  "versionClassificationSignature": "6253cdc6adfd3690c7a269d61868d8d53822a560636565754d3cb553ac52bd24"
+}

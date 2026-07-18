@@ -1,0 +1,34 @@
+{
+  "finalizationTarget": "cft1:85163b606e06c1b681ebdfe03199b9022e3384cd297ffdc20ec79f414f5b805b",
+  "fixture": "oscillate-base",
+  "manifestSha256": "aef273e7d5489570a11134e56a2119958d7b4bd545f97d66a04cccd8f5050607",
+  "sections": [
+    {
+      "anchorId": "9alfb74m5sx4",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "General",
+      "citationId": "GLD-9alfb74m5sx4",
+      "classificationSignature": "2263205dbc23298306f3334ef943ba4a18eeb09c0813c767db5853575d31e6eb",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Retention Schedule",
+        "Records"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 0,
+      "textSha256": "2e11fafcac70b33366e88d34d36cedaf1c3638f80b734eda935de7c73099125f",
+      "title": "Records",
+      "topics": []
+    }
+  ],
+  "versionClassificationSignature": "17cd6320d035a316bf1866da59a5038d609e8262f9d3805b08ef7052067f17d4"
+}

@@ -987,3 +987,285 @@ def test_concurrent_json_creates_respect_the_byte_quota_on_postgres(
     assert rows["documents"] == 1 and rows["versions"] == 1 and rows["blobs"] == 1, (
         "the losing create left rows behind"
     )
+
+
+# ==========================================================================
+# M3 — finalization concurrency: one successor per source, unique prefixes,
+# and a pointer that never moves backwards, on real PostgreSQL row locks.
+# ==========================================================================
+
+
+def _make_transitional_document(session_factory, *, slug: str, title: str = "policy"):
+    """Company + document + ready pre-m3-transitional version (direct rows —
+    the trigger race needs eligibility, not a full ingestion run)."""
+    from app.ingestion.sectionizer import ANCHOR_ALGO_TRANSITIONAL
+
+    setup = session_factory()
+    try:
+        company = Company(name=f"Fin {slug}", slug=f"fin-{slug}")
+        setup.add(company)
+        setup.flush()
+        doc = Document(company_id=company.id, title=title, slug=slug, status="ready")
+        setup.add(doc)
+        setup.flush()
+        version = DocumentVersion(
+            document_id=doc.id,
+            company_id=company.id,
+            version_no=1,
+            status="ready",
+            anchor_algo_version=ANCHOR_ALGO_TRANSITIONAL,
+            content_sha256="a" * 64,
+        )
+        setup.add(version)
+        setup.flush()
+        doc.current_version_id = version.id
+        setup.commit()
+        return company.id, doc.id, version.id
+    finally:
+        setup.close()
+
+
+@requires_postgres
+def test_concurrent_finalize_triggers_converge_on_one_successor_on_postgres(session_factory):
+    """Two finalization triggers race past the pre-select; the unique
+    (source_version_id, finalization_engine) index picks one winner, the loser
+    adopts the survivor, and exactly one live finalize job exists."""
+    from app.models.db_models import JOB_OPERATION_FINALIZE
+    from app.services.document_finalize import finalize_source_version
+
+    company_id, document_id, version_id = _make_transitional_document(
+        session_factory, slug="race-successor"
+    )
+
+    successor_ids: List[str] = []
+    ids_lock = threading.Lock()
+
+    def trigger() -> None:
+        session = session_factory()
+        try:
+            doc = session.get(Document, document_id)
+            source = session.get(DocumentVersion, version_id)
+            outcome = finalize_source_version(session, source_version=source, document=doc)
+            with ids_lock:
+                successor_ids.append(outcome.successor.id)
+        finally:
+            session.close()
+
+    errors = run_concurrently([trigger, trigger])
+    assert errors == [], f"worker raised: {errors}"
+    assert len(successor_ids) == 2 and len(set(successor_ids)) == 1
+
+    check = session_factory()
+    try:
+        successors = check.execute(
+            select(DocumentVersion).where(DocumentVersion.source_version_id == version_id)
+        ).scalars().all()
+        assert len(successors) == 1
+        assert successors[0].version_no == 2  # version_no allocation stayed unique
+        live = check.execute(
+            select(IngestionJob).where(
+                IngestionJob.version_id == successors[0].id,
+                IngestionJob.state.in_((JOB_STATE_QUEUED, JOB_STATE_RUNNING)),
+            )
+        ).scalars().all()
+        assert len(live) == 1
+        assert live[0].operation == JOB_OPERATION_FINALIZE
+    finally:
+        check.close()
+
+
+@requires_postgres
+def test_concurrent_citation_prefix_allocation_is_unique_on_postgres(session_factory):
+    """Two documents with identical titles mint prefixes concurrently; the
+    tenant-scoped unique index arbitrates: one gets the base, one the suffix."""
+    from app.ingestion.pipeline import ensure_citation_prefix
+
+    setup = session_factory()
+    try:
+        company = Company(name="Prefix Race Co", slug="prefix-race-co")
+        setup.add(company)
+        setup.flush()
+        doc_ids = []
+        for n in (1, 2):
+            doc = Document(company_id=company.id, title="policy", slug=f"prefix-{n}")
+            setup.add(doc)
+            setup.flush()
+            doc_ids.append(doc.id)
+        setup.commit()
+    finally:
+        setup.close()
+
+    def mint(doc_id: str) -> None:
+        session = session_factory()
+        try:
+            doc = session.get(Document, doc_id)
+            ensure_citation_prefix(session, doc)
+        finally:
+            session.close()
+
+    errors = run_concurrently([lambda: mint(doc_ids[0]), lambda: mint(doc_ids[1])])
+    assert errors == [], f"worker raised: {errors}"
+
+    check = session_factory()
+    try:
+        prefixes = sorted(
+            check.get(Document, doc_id).citation_prefix for doc_id in doc_ids
+        )
+        assert prefixes == ["PLC", "PLC2"]
+    finally:
+        check.close()
+
+
+@requires_postgres
+def test_concurrent_flips_never_move_the_pointer_backwards_on_postgres(session_factory):
+    """A stale (lower) ready version and a newer ready version flip
+    concurrently: whatever the interleaving, the pointer ends on the newer
+    version — the conditional UPDATE is the guard, not scheduling luck."""
+    from app.ingestion.anchors import ANCHOR_ALGO_VERSION
+    from app.ingestion.pipeline import _flip_current_version
+
+    company_id, document_id, v1_id = _make_transitional_document(
+        session_factory, slug="race-flip"
+    )
+    setup = session_factory()
+    try:
+        v2 = DocumentVersion(
+            document_id=document_id,
+            company_id=company_id,
+            version_no=2,
+            status="ready",
+            anchor_algo_version=ANCHOR_ALGO_VERSION,
+            content_sha256="a" * 64,
+        )
+        setup.add(v2)
+        setup.commit()
+        v2_id = v2.id
+    finally:
+        setup.close()
+
+    def flip(version_id: str) -> None:
+        session = session_factory()
+        try:
+            doc = session.get(Document, document_id)
+            version = session.get(DocumentVersion, version_id)
+            _flip_current_version(session, doc, version)
+            session.commit()
+        finally:
+            session.close()
+
+    for _ in range(5):  # repeat: the interleaving must not matter
+        errors = run_concurrently([lambda: flip(v1_id), lambda: flip(v2_id)])
+        assert errors == [], f"worker raised: {errors}"
+        check = session_factory()
+        try:
+            assert check.get(Document, document_id).current_version_id == v2_id
+        finally:
+            check.close()
+
+
+@requires_postgres
+def test_concurrent_identical_complete_targets_make_one_successor_on_postgres(session_factory):
+    """The successor race is arbitrated by the COMPLETE finalization target
+    digest (`cft1:<sha256>`), not the bare anchor version. Two triggers under
+    identical current code compute the same complete target, so the unique
+    (source_version_id, finalization_engine) index converges them onto one
+    successor whose finalization_engine is that digest."""
+    from app.ingestion.finalization_target import build_finalization_target
+    from app.modules.loader import get_active_module
+    from app.services.document_finalize import finalize_source_version
+
+    company_id, document_id, version_id = _make_transitional_document(
+        session_factory, slug="race-complete-target"
+    )
+    # the document has no mime_type -> text source format
+    expected_digest = build_finalization_target("text", get_active_module()).digest
+
+    successor_ids: List[str] = []
+    ids_lock = threading.Lock()
+
+    def trigger() -> None:
+        session = session_factory()
+        try:
+            doc = session.get(Document, document_id)
+            source = session.get(DocumentVersion, version_id)
+            outcome = finalize_source_version(session, source_version=source, document=doc)
+            with ids_lock:
+                successor_ids.append(outcome.successor.id)
+        finally:
+            session.close()
+
+    errors = run_concurrently([trigger, trigger])
+    assert errors == [], f"worker raised: {errors}"
+    assert len(successor_ids) == 2 and len(set(successor_ids)) == 1
+
+    check = session_factory()
+    try:
+        successors = check.execute(
+            select(DocumentVersion).where(DocumentVersion.source_version_id == version_id)
+        ).scalars().all()
+        assert len(successors) == 1
+        assert successors[0].finalization_engine == expected_digest
+        assert successors[0].finalization_engine.startswith("cft1:")
+    finally:
+        check.close()
+
+
+@requires_postgres
+def test_source_successor_integrity_enforced_by_postgres(session_factory):
+    """The composite self-reference is enforced by PostgreSQL itself (real FK,
+    not create_all-only): a successor whose source belongs to another tenant
+    or another document is rejected at flush, and a valid same-document
+    reference is accepted. This proves the constraint under the production
+    engine, not merely SQLite."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.ingestion.finalization_target import build_finalization_target
+    from app.modules.loader import get_active_module
+
+    company_a, doc_a, source_a = _make_transitional_document(
+        session_factory, slug="integrity-a"
+    )
+    company_b, doc_b, _source_b = _make_transitional_document(
+        session_factory, slug="integrity-b"
+    )
+    engine = build_finalization_target("text", get_active_module()).digest
+
+    def _attempt(document_id: str, company_id: str, source_version_id: str) -> bool:
+        session = session_factory()
+        try:
+            row = DocumentVersion(
+                document_id=document_id,
+                company_id=company_id,
+                version_no=99,
+                source_version_id=source_version_id,
+                finalization_engine=engine,
+            )
+            session.add(row)
+            try:
+                session.commit()
+                return True
+            except IntegrityError:
+                session.rollback()
+                return False
+        finally:
+            session.close()
+
+    # cross-tenant: doc_b/company_b successor pointing at tenant A's source
+    assert _attempt(doc_b, company_b, source_a) is False
+    # cross-document: doc_b/company_b pointing at doc_a's source (same tenant A
+    # id would still be a different document) — use company_a mismatch too
+    assert _attempt(doc_b, company_a, source_a) is False
+    # valid same-document reference is accepted
+    assert _attempt(doc_a, company_a, source_a) is True
+
+    # and once referenced, the source cannot be deleted alone
+    session = session_factory()
+    try:
+        from sqlalchemy import delete
+
+        with pytest.raises(IntegrityError):
+            session.execute(delete(DocumentVersion).where(DocumentVersion.id == source_a))
+            session.commit()
+        session.rollback()
+    finally:
+        session.close()

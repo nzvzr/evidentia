@@ -1,0 +1,61 @@
+{
+  "finalizationTarget": "cft1:85163b606e06c1b681ebdfe03199b9022e3384cd297ffdc20ec79f414f5b805b",
+  "fixture": "oscillate-grow",
+  "manifestSha256": "4879ffe8d96bace50a0fc11ebf24782a5f146f912e6ed5b6e5dc646e884a72f4",
+  "sections": [
+    {
+      "anchorId": "9alfb74m5sx4.p1",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "split-lineage",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "9alfb74m5sx4"
+      },
+      "category": "General",
+      "citationId": "GLD-9alfb74m5sx4.p1",
+      "classificationSignature": "96a87cc569f880d731cf0acf587489085cd96cdc5ce8e5429447aa174361ac2e",
+      "decision": "split-lineage",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Retention Schedule",
+        "Records"
+      ],
+      "inheritedFrom": "9alfb74m5sx4",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 0,
+      "textSha256": "85c9cd0b70ae6c0aa24e1e4fb8f0aa326f8ee7240d5f39df118c4d8060f97ca9",
+      "title": "Records",
+      "topics": []
+    },
+    {
+      "anchorId": "9alfb74m5sx4.p2",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "General",
+      "citationId": "GLD-9alfb74m5sx4.p2",
+      "classificationSignature": "29f0be554ebfde63f95bf0923b8b5673421e9d733a3f03678182ee48c4d97799",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Retention Schedule",
+        "Records"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 1,
+      "textSha256": "223f4469a0507ded6ac382aa30e87fcc50581189ebbac0fe4888e131e9f0765b",
+      "title": "Records",
+      "topics": []
+    }
+  ],
+  "versionClassificationSignature": "be8a34fe43b2b63f217abff5b177ff534fe2d26052846361f1cfb4ec89a5bdaf"
+}

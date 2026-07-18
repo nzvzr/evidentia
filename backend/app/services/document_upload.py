@@ -42,6 +42,8 @@ from app.ingestion.parsers import FORMAT_MARKDOWN, FORMAT_TEXT
 from app.ingestion.pipeline import MARKDOWN_MIME, TEXT_MIME
 from app.models.db_models import (
     DOCUMENT_STATUS_PROCESSING,
+    JOB_OPERATION_FINALIZE,
+    JOB_OPERATION_INGEST,
     JOB_STATE_QUEUED,
     JOB_STATE_RUNNING,
     VERSION_STATUS_FAILED,
@@ -464,7 +466,15 @@ def create_new_version_upload(
             latest.error_detail = None
             if document.current_version_id is None:
                 document.status = DOCUMENT_STATUS_PROCESSING
-            jobs.enqueue(db, company_id=company_id, document_id=document.id, version_id=latest.id)
+            jobs.enqueue(
+                db,
+                company_id=company_id,
+                document_id=document.id,
+                version_id=latest.id,
+                operation=(
+                    JOB_OPERATION_FINALIZE if latest.source_version_id else JOB_OPERATION_INGEST
+                ),
+            )
             db.commit()
             return UploadOutcome(
                 document=document, version=latest, created=True, retried=True
@@ -516,8 +526,18 @@ def retry_failed_version(
     latest.error_detail = None
     if document.current_version_id is None:
         document.status = DOCUMENT_STATUS_PROCESSING
+    # A finalization successor retries as a finalize job; an upload version
+    # retries as an ingest job. The discriminator is explicit, never inferred
+    # from job history.
+    operation = (
+        JOB_OPERATION_FINALIZE if latest.source_version_id else JOB_OPERATION_INGEST
+    )
     jobs.enqueue(
-        db, company_id=document.company_id, document_id=document.id, version_id=latest.id
+        db,
+        company_id=document.company_id,
+        document_id=document.id,
+        version_id=latest.id,
+        operation=operation,
     )
     db.commit()
     logger.info(

@@ -16,6 +16,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -47,6 +48,7 @@ DOCUMENT_STATUS_FAILED = "failed"
 VERSION_STATUS_PENDING = "pending"
 VERSION_STATUS_EXTRACTING = "extracting"
 VERSION_STATUS_SECTIONING = "sectioning"
+VERSION_STATUS_ANCHORING = "anchoring"
 VERSION_STATUS_CLASSIFYING = "classifying"
 VERSION_STATUS_READY = "ready"
 VERSION_STATUS_FAILED = "failed"
@@ -55,6 +57,14 @@ JOB_STATE_QUEUED = "queued"
 JOB_STATE_RUNNING = "running"
 JOB_STATE_SUCCEEDED = "succeeded"
 JOB_STATE_FAILED = "failed"
+
+# Ingestion job operations (M3). `ingest` is the M2 semantics (extract ->
+# sectionize -> transitional-ready); `finalize` is the M3 successor-version
+# path (re-ingest the retained source blob with final anchors, citation
+# identities, deterministic classification and a final manifest). Explicit and
+# typed so the two kinds of work are never conflated in the job table.
+JOB_OPERATION_INGEST = "ingest"
+JOB_OPERATION_FINALIZE = "finalize"
 
 
 def _uuid() -> str:
@@ -184,10 +194,12 @@ class Document(Base):
     mime_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     content_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # latest original bytes
     size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    # 3–5 uppercase chars, unique per tenant; minted by the anchor/citation
-    # scheme (M3) and immutable thereafter — the prefix is identity, not
-    # description. Nullable until M3 assigns them.
-    citation_prefix: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    # 3–5 uppercase base chars + numeric collision suffix, unique per tenant;
+    # minted by the anchor/citation scheme (M3) and immutable thereafter — the
+    # prefix is identity, not description. Nullable until M3 assigns them.
+    # Width 12 = 5-char base + up to 7 suffix digits: capacity beyond any
+    # configured tenant document quota (candidates are minted through quota+1).
+    citation_prefix: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
     # Pointer to the version generation reads. Flipped atomically, only to
     # `ready` versions. Deliberately NOT a DB-level foreign key: documents and
     # document_versions would then reference each other, and SQLite (the dev
@@ -223,6 +235,44 @@ class DocumentVersion(Base):
         # Also the document_id access path: its leftmost column serves every
         # document_id-only lookup, so no separate single-column index exists.
         UniqueConstraint("document_id", "version_no", name="uq_document_versions_document_no"),
+        # M3: at most ONE finalization successor per (source version, COMPLETE
+        # finalization target), enforced by the database — concurrent
+        # finalization triggers racing past the application pre-select cannot
+        # create two successors. NULLs are distinct on both PostgreSQL and
+        # SQLite, so ordinary upload versions (source_version_id NULL) coexist
+        # freely.
+        Index(
+            "uq_document_versions_source_engine",
+            "source_version_id",
+            "finalization_engine",
+            unique=True,
+        ),
+        # M3: composite parent key for the tenant-safe self-reference below.
+        UniqueConstraint(
+            "id", "document_id", "company_id",
+            name="uq_document_versions_id_doc_company",
+        ),
+        # M3: the DATABASE enforces that a successor's source version belongs
+        # to the SAME document and the SAME tenant — a cross-document or
+        # cross-tenant source_version_id is unrepresentable, not merely
+        # service-checked. Default (NO ACTION) referential semantics: deleting
+        # a source version alone while a successor references it fails at
+        # statement end on PostgreSQL and SQLite alike, while a whole-document
+        # (or tenant) CASCADE — which removes source and successor together —
+        # still passes. Rule (explicit): a successor references ONLY the
+        # blob-owning transitional upload version (never another successor);
+        # the service layer enforces that direction via the
+        # `pre-m3-transitional` eligibility check, and the successor itself
+        # carries no blob row — its bytes resolve through this reference.
+        ForeignKeyConstraint(
+            ["source_version_id", "document_id", "company_id"],
+            [
+                "document_versions.id",
+                "document_versions.document_id",
+                "document_versions.company_id",
+            ],
+            name="fk_document_versions_source_same_doc",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -247,6 +297,27 @@ class DocumentVersion(Base):
     parser_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     parser_version: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     anchor_algo_version: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
+    # --- M3 finalization provenance (additive; NULL on ordinary uploads) ---
+    # The pre-m3-transitional version this row was re-ingested from. Guarded
+    # by the composite self-referential FK in __table_args__: the database
+    # itself rejects a source in another document or another tenant and
+    # blocks deleting a referenced source, while whole-document CASCADE
+    # (removing source + successor together) still works.
+    source_version_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    # The COMPLETE finalization target digest ("cft1:<sha256>") this successor
+    # was produced for — parser/normalizer/sectionizer/anchor/inheritance/
+    # classifier/module/manifest/thresholds, never a single component label.
+    # Part of the one-successor-per-(source, target) uniqueness above.
+    finalization_engine: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    # Bounded typed dict of every load-bearing derived-processing version
+    # (parser, normalizer, sectionizer, anchor algo, inheritance, classifier,
+    # module id/version/digest). Written once with the final manifest.
+    engine_versions: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # Version-level deterministic classification signature: sha256 over the
+    # ordered per-section signatures + engine/module versions. Proves which
+    # deterministic engine produced the classification set.
+    classification_signature: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=VERSION_STATUS_PENDING)
     error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
@@ -359,6 +430,17 @@ class DocumentSection(Base):
     classifier_version: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     signature_pack_version: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
+    # --- M3 identity + classification provenance (additive) ---
+    # How this section's anchor was decided (bounded typed metadata: decision
+    # kind, inherited-from anchor, similarity) — enough to reproduce the
+    # inheritance decision from stored inputs.
+    anchor_provenance: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # The deterministic rule ids (module-namespaced) that supported this
+    # section's classification. Bounded list; display/audit only.
+    matched_rules: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+    # Per-section deterministic classification signature (sha256 hex).
+    classification_signature: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -401,6 +483,12 @@ class IngestionJob(Base):
         String(36), ForeignKey("document_versions.id", ondelete="CASCADE"), index=True
     )
     state: Mapped[str] = mapped_column(String(20), nullable=False, server_default=JOB_STATE_QUEUED)
+    # M3: explicit typed operation discriminator — "ingest" (M2 semantics,
+    # the default so existing rows keep their meaning) or "finalize" (M3
+    # successor processing). Never inferred from context.
+    operation: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=JOB_OPERATION_INGEST
+    )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

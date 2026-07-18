@@ -20,6 +20,16 @@ ERROR_MISSING_BLOB = "missing_blob"
 ERROR_INTERNAL = "ingestion_failed"
 ERROR_STALE_ABANDONED = "stale_abandoned"
 
+# M3 finalization failures (typed, per stage).
+ERROR_ANCHORING_FAILED = "anchoring_failed"
+ERROR_CLASSIFICATION_FAILED = "classification_failed"
+ERROR_MODULE_INVALID = "module_invalid"
+ERROR_CITATION_PREFIX_FAILED = "citation_prefix_failed"
+# The queued job pins a complete finalization target this process cannot
+# reproduce exactly (older/newer code, different module pack/config). Fail
+# closed: never generate a different artifact than the one requested.
+ERROR_UNSUPPORTED_TARGET = "unsupported_finalization_target"
+
 _MAX_DETAIL_CHARS = 300
 
 

@@ -1,0 +1,13 @@
+{
+  "id": "compliance",
+  "version": "1.0.0",
+  "description": "Compliance domain module #1: the eight-category demo taxonomy, market/regulatory facets and persona needle sets, packaged as versioned data (PLATFORM_ARCHITECTURE.md §3.2). The labels are unchanged from the demo pipeline; only their ownership moves out of engine code.",
+  "engineCompatibility": {
+    "classifier": ["m3.1"]
+  },
+  "fixtures": [
+    "golden/compliance-positive.md",
+    "golden/compliance-negative.md",
+    "golden/unclassified.md"
+  ]
+}

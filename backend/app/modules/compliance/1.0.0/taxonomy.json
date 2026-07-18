@@ -1,0 +1,58 @@
+{
+  "categories": [
+    { "id": "Security", "description": "Security posture: encryption, access control, auditability, certifications." },
+    { "id": "Compliance", "description": "Regulatory obligations: data residency, sovereignty, privacy, regulated workloads." },
+    { "id": "API", "description": "API surface: endpoints, authentication, rate limits, webhooks, SDKs." },
+    { "id": "Reliability", "description": "Availability commitments: SLA, uptime, credits, failover, recovery objectives." },
+    { "id": "Deployment", "description": "Deployment and migration: topology, rollout, rollback, environments." },
+    { "id": "Operations", "description": "Operational process: incidents, on-call, escalation, runbooks, monitoring." },
+    { "id": "Pricing", "description": "Commercial terms: tiers, usage limits, overage, discounts, billing." },
+    { "id": "Enablement", "description": "Adoption and training: onboarding, kickoff, go-live, education." },
+    { "id": "General", "description": "Below-threshold fallback: no category signature cleared the confidence threshold.", "fallback": true }
+  ],
+  "topics": [
+    { "id": "encryption", "label": "Encryption", "signals": ["encryption", "encrypted", "tls", "kms", "ciphertext"], "phrases": ["encryption at rest", "encryption in transit", "key management"] },
+    { "id": "access-control", "label": "Access control", "signals": ["rbac", "sso", "saml", "permissions", "authorization"], "phrases": ["access control", "least privilege", "single sign-on"] },
+    { "id": "audit", "label": "Audit", "signals": ["audit", "auditable", "logging"], "phrases": ["audit log", "audit trail", "audit logging"] },
+    { "id": "certifications", "label": "Certifications", "signals": ["certification", "certified", "attestation"], "phrases": ["soc 2", "iso 27001", "penetration test"] },
+    { "id": "auth", "label": "Auth", "signals": ["oauth", "token", "credentials", "authentication"], "phrases": ["api key", "bearer token", "token rotation"] },
+    { "id": "rate-limits", "label": "Rate limits", "signals": ["throttle", "throttling", "quota", "429"], "phrases": ["rate limit", "rate limits", "rate limiting", "requests per second"] },
+    { "id": "retries", "label": "Retries", "signals": ["retry", "retries", "backoff", "idempotency"], "phrases": ["exponential backoff", "retry policy"] },
+    { "id": "webhooks", "label": "Webhooks", "signals": ["webhook", "webhooks", "callback"], "phrases": ["webhook delivery", "event subscription"] },
+    { "id": "availability", "label": "Availability", "signals": ["uptime", "availability", "downtime", "sla"], "phrases": ["service level", "uptime commitment", "monthly uptime"] },
+    { "id": "credits", "label": "Credits", "signals": ["credit", "credits", "remedy"], "phrases": ["service credits", "credit request"] },
+    { "id": "failover", "label": "Failover", "signals": ["failover", "redundancy", "replica", "rto", "rpo"], "phrases": ["multi-region failover", "disaster recovery"] },
+    { "id": "escalation", "label": "Escalation", "signals": ["escalation", "escalate", "paging"], "phrases": ["escalation path", "incident commander", "page the on-call"] },
+    { "id": "topology", "label": "Topology", "signals": ["topology", "cluster", "regions", "architecture"], "phrases": ["deployment topology", "reference architecture"] },
+    { "id": "migration", "label": "Migration", "signals": ["migration", "migrate", "cutover"], "phrases": ["migration plan", "migration window"] },
+    { "id": "rollback", "label": "Rollback", "signals": ["rollback", "revert"], "phrases": ["rollback plan", "blue-green"] },
+    { "id": "residency", "label": "Residency", "signals": ["residency", "sovereignty", "sovereign", "region-locked"], "phrases": ["data residency", "data sovereignty", "regional processing"] },
+    { "id": "regulated-workloads", "label": "Regulated workloads", "signals": ["regulated", "regulator", "regulation", "gdpr", "hipaa"], "phrases": ["regulated workloads", "regulatory requirements"] },
+    { "id": "data-export", "label": "Data export", "signals": ["export", "portability", "erasure"], "phrases": ["data export", "right to erasure", "data portability"] },
+    { "id": "severity-matrix", "label": "Severity matrix", "signals": ["severity", "sev1", "sev2", "priority"], "phrases": ["severity matrix", "severity level"] },
+    { "id": "on-call", "label": "On-call", "signals": ["on-call", "oncall", "rotation", "runbook"], "phrases": ["on-call rotation", "incident response"] },
+    { "id": "tiers", "label": "Tiers", "signals": ["tier", "tiers", "plan", "subscription"], "phrases": ["pricing tier", "plan comparison"] },
+    { "id": "usage-limits", "label": "Usage limits", "signals": ["usage", "limits", "metering"], "phrases": ["usage limits", "usage-based"] },
+    { "id": "overage", "label": "Overage", "signals": ["overage", "egress", "surcharge"], "phrases": ["egress overage", "overage charges"] },
+    { "id": "discounts", "label": "Discounts", "signals": ["discount", "discounts", "commitment"], "phrases": ["volume discount", "committed use"] },
+    { "id": "kickoff", "label": "Kickoff", "signals": ["kickoff", "milestones"], "phrases": ["project kickoff", "success criteria"] },
+    { "id": "training", "label": "Training", "signals": ["training", "enablement", "workshop", "certification"], "phrases": ["training plan", "admin training"] },
+    { "id": "go-live", "label": "Go-live", "signals": ["go-live", "launch", "cutover"], "phrases": ["go-live checklist", "launch readiness"] },
+    { "id": "validation", "label": "Validation", "signals": ["validation", "verify", "acceptance"], "phrases": ["validation checklist", "acceptance criteria"] }
+  ],
+  "markets": [
+    { "id": "EMEA", "signals": ["gdpr", "emea", "eu", "european"], "phrases": ["data residency", "european union", "regional processing", "data protection"] },
+    { "id": "Public Sector (GovCloud)", "signals": ["fedramp", "govcloud", "government", "public-sector"], "phrases": ["public sector", "government workloads", "authority to operate"] },
+    { "id": "Financial Services", "signals": ["pci", "finra", "banking", "financial"], "phrases": ["financial services", "pci dss", "payment card"] },
+    { "id": "Healthcare", "signals": ["hipaa", "phi", "healthcare", "patient"], "phrases": ["protected health information", "business associate agreement"] }
+  ],
+  "personas": [
+    { "id": "support", "needles": ["resolution", "sla", "escalation", "severity", "entitlements", "privacy", "refund", "customer"] },
+    { "id": "sales", "needles": ["objection", "security", "competitive", "sla", "residency", "rate limits", "compliance", "proof"] },
+    { "id": "compliance", "needles": ["residency", "audit", "encryption", "regulated", "controls", "retention", "sovereignty", "erasure"] },
+    { "id": "ops", "needles": ["uptime", "incident", "on-call", "overage", "cost", "credits", "monitoring", "process"] },
+    { "id": "architect", "needles": ["topology", "failover", "residency", "rate limits", "rollback", "architecture", "api", "migration"] },
+    { "id": "newhire", "needles": ["onboarding", "training", "severity", "escalation", "validation", "basics", "checklist", "kickoff"] },
+    { "id": "field", "needles": ["severity", "escalation", "on-site", "safety", "triage", "boundaries", "equipment", "incident"] }
+  ]
+}

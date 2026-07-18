@@ -1,0 +1,11 @@
+This plain text document has no headings at all. It simply describes, in a
+few paragraphs, how the support team hands over unresolved tickets at the end
+of a shift and what notes must accompany each unresolved case.
+
+The second paragraph explains that every handover note lists the customer,
+the current severity, the last action taken, and the next step the incoming
+agent should perform, so nothing is lost between shifts.
+
+The third paragraph reminds agents that entitlement questions and refund
+boundaries are answered from the entitlement matrix, never from memory, and
+that privacy escalations page the privacy officer directly.

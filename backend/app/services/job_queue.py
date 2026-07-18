@@ -28,13 +28,14 @@ M2 adds the worker half, with the binding requirements recorded on the
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import List, Optional, Protocol, Tuple
+from typing import Collection, List, Optional, Protocol, Tuple
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.db_models import (
+    JOB_OPERATION_INGEST,
     JOB_STATE_FAILED,
     JOB_STATE_QUEUED,
     JOB_STATE_RUNNING,
@@ -51,17 +52,35 @@ class JobQueue(Protocol):
     method flushes but never commits, so the caller decides the commit point
     (the worker commits a claim immediately to make ownership durable)."""
 
-    def enqueue(self, db: Session, *, company_id: str, document_id: str, version_id: str) -> IngestionJob:  # pragma: no cover
-        """Queue ingestion work for a document version and return the job row.
+    def enqueue(
+        self,
+        db: Session,
+        *,
+        company_id: str,
+        document_id: str,
+        version_id: str,
+        operation: str = JOB_OPERATION_INGEST,
+    ) -> IngestionJob:  # pragma: no cover
+        """Queue work for a document version and return the job row.
 
-        Idempotent per version: a version that already has a live (queued or
-        running) job gets that job back instead of a duplicate.
+        `operation` is the explicit typed discriminator ("ingest" | M3
+        "finalize"). Idempotent per version: a version that already has a
+        live (queued or running) job gets that job back instead of a
+        duplicate.
         """
         ...
 
-    def claim(self, db: Session, *, now: Optional[datetime] = None) -> Optional[IngestionJob]:  # pragma: no cover
+    def claim(
+        self,
+        db: Session,
+        *,
+        now: Optional[datetime] = None,
+        version_ids: Optional[Collection[str]] = None,
+    ) -> Optional[IngestionJob]:  # pragma: no cover
         """Atomically claim the next queued job (tenant-fair), moving it
-        queued -> running and incrementing `attempts`. None when idle."""
+        queued -> running and incrementing `attempts`. None when idle.
+        ``version_ids`` restricts claiming to jobs for those versions (used by
+        bounded inline processing so a CLI run never drains unrelated work)."""
         ...
 
     def heartbeat(self, db: Session, job_id: str, *, now: Optional[datetime] = None) -> bool:  # pragma: no cover
@@ -119,7 +138,15 @@ class DatabaseJobQueue:
             )
         ).scalars().first()
 
-    def enqueue(self, db: Session, *, company_id: str, document_id: str, version_id: str) -> IngestionJob:
+    def enqueue(
+        self,
+        db: Session,
+        *,
+        company_id: str,
+        document_id: str,
+        version_id: str,
+        operation: str = JOB_OPERATION_INGEST,
+    ) -> IngestionJob:
         existing = self._live_job(db, company_id, version_id)
         if existing is not None:
             return existing
@@ -128,6 +155,7 @@ class DatabaseJobQueue:
             document_id=document_id,
             version_id=version_id,
             state=JOB_STATE_QUEUED,
+            operation=operation,
         )
         try:
             with db.begin_nested():
@@ -146,11 +174,13 @@ class DatabaseJobQueue:
 
     # -- claim (M2) ----------------------------------------------------------- #
 
-    def _queued_candidates(self, db: Session) -> List[Tuple[str, str]]:
+    def _queued_candidates(
+        self, db: Session, version_ids: Optional[Collection[str]] = None
+    ) -> List[Tuple[str, str]]:
         """One candidate per tenant: (company_id, job_id of that tenant's
         oldest queued job — created_at then id for a total, deterministic
-        order)."""
-        rows = db.execute(
+        order). ``version_ids`` bounds the candidate set for scoped runs."""
+        query = (
             select(
                 IngestionJob.company_id,
                 IngestionJob.id,
@@ -158,15 +188,24 @@ class DatabaseJobQueue:
             )
             .where(IngestionJob.state == JOB_STATE_QUEUED)
             .order_by(IngestionJob.created_at.asc(), IngestionJob.id.asc())
-        ).all()
+        )
+        if version_ids is not None:
+            query = query.where(IngestionJob.version_id.in_(list(version_ids)))
+        rows = db.execute(query).all()
         oldest_per_company: dict[str, str] = {}
         for company_id, job_id, _created in rows:
             oldest_per_company.setdefault(company_id, job_id)
         return sorted(oldest_per_company.items())
 
-    def claim(self, db: Session, *, now: Optional[datetime] = None) -> Optional[IngestionJob]:
+    def claim(
+        self,
+        db: Session,
+        *,
+        now: Optional[datetime] = None,
+        version_ids: Optional[Collection[str]] = None,
+    ) -> Optional[IngestionJob]:
         now = now or datetime.utcnow()
-        candidates = self._queued_candidates(db)
+        candidates = self._queued_candidates(db, version_ids)
         if not candidates:
             return None
 

@@ -1,0 +1,338 @@
+{
+  "finalizationTarget": "cft1:85163b606e06c1b681ebdfe03199b9022e3384cd297ffdc20ec79f414f5b805b",
+  "fixture": "delete-section",
+  "manifestSha256": "ba0de08cb90f32328da05c8c439b621ba734ba715506cfbcba8b5ac2b381d33d",
+  "sections": [
+    {
+      "anchorId": "hnj3h3q2ijhe",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "hnj3h3q2ijhe"
+      },
+      "category": "General",
+      "citationId": "GLD-hnj3h3q2ijhe",
+      "classificationSignature": "003c0f98c5d9a8b7a34915b6bbbf568f15e37bc0b903424fc11f4f2ee29e1836",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "This handbook opens with a plain preamble that sits before"
+      ],
+      "inheritedFrom": "hnj3h3q2ijhe",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 0,
+      "textSha256": "4344cbdcb3c4244aa4262ced1535fed46018a21c7eca1e074cabff1b6d69798f",
+      "title": "This handbook opens with a plain preamble that sits before",
+      "topics": []
+    },
+    {
+      "anchorId": "73vw2fe6606u",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "73vw2fe6606u"
+      },
+      "category": "Compliance",
+      "citationId": "GLD-73vw2fe6606u",
+      "classificationSignature": "d8ff17716303149ff952c243710233188eabb38db391606d14262a92055fc039",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Data Residency"
+      ],
+      "inheritedFrom": "73vw2fe6606u",
+      "injectionFlags": [],
+      "marketFlags": [
+        "EMEA"
+      ],
+      "matchedRules": [
+        "compliance.category.compliance",
+        "compliance.market.emea",
+        "compliance.topic.regulated-workloads",
+        "compliance.topic.residency"
+      ],
+      "ordinal": 1,
+      "textSha256": "550ee11fef2a5d430564b43eaf5bf816e99800b14178f8e40d1dab12cf41e36f",
+      "title": "Data Residency",
+      "topics": [
+        "Residency",
+        "Regulated workloads"
+      ]
+    },
+    {
+      "anchorId": "2h4jml14jos2",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "2h4jml14jos2"
+      },
+      "category": "Security",
+      "citationId": "GLD-2h4jml14jos2",
+      "classificationSignature": "c8222d3b8d14755d282aedec593eb3a080af06272ae59f5e143aa9ea94e4ff1b",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Access Control"
+      ],
+      "inheritedFrom": "2h4jml14jos2",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.security",
+        "compliance.topic.access-control",
+        "compliance.topic.audit",
+        "compliance.topic.encryption"
+      ],
+      "ordinal": 2,
+      "textSha256": "933d3149772a9062bbe55b10eec72dfbe3c38bb6a0ad9604e94f8cff49def38b",
+      "title": "Access Control",
+      "topics": [
+        "Encryption",
+        "Access control",
+        "Audit"
+      ]
+    },
+    {
+      "anchorId": "0wvrlbswhdg7",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "0wvrlbswhdg7"
+      },
+      "category": "Deployment",
+      "citationId": "GLD-0wvrlbswhdg7",
+      "classificationSignature": "eaf3d736667f375d74875e0fcf27aaacef7fa80b3eca0a218d24cf79e6de6318",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Deployment Steps"
+      ],
+      "inheritedFrom": "0wvrlbswhdg7",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.deployment",
+        "compliance.topic.migration",
+        "compliance.topic.rollback",
+        "compliance.topic.topology"
+      ],
+      "ordinal": 3,
+      "textSha256": "8ef6e9d9e5457854da5f5a4f311221e3152ec2236c628c95745fb73169c0756f",
+      "title": "Deployment Steps",
+      "topics": [
+        "Topology",
+        "Migration",
+        "Rollback"
+      ]
+    },
+    {
+      "anchorId": "85yrnyntez1x",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "85yrnyntez1x"
+      },
+      "category": "Reliability",
+      "citationId": "GLD-85yrnyntez1x",
+      "classificationSignature": "d2318ff92d268ccb12d7f210adf83093403d975994bb9c76a9caa8598a41db64",
+      "decision": "unchanged",
+      "hasOmittedContent": true,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Architecture Overview"
+      ],
+      "inheritedFrom": "85yrnyntez1x",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.reliability",
+        "compliance.topic.failover",
+        "compliance.topic.topology"
+      ],
+      "ordinal": 4,
+      "textSha256": "bf7969d4884878d30d27f6faede8fbeb235ccb99a56c702bc18d99e4b757cf51",
+      "title": "Architecture Overview",
+      "topics": [
+        "Failover",
+        "Topology"
+      ]
+    },
+    {
+      "anchorId": "pcixbspscb4d",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "pcixbspscb4d"
+      },
+      "category": "Operations",
+      "citationId": "GLD-pcixbspscb4d",
+      "classificationSignature": "5eeda6ff2e20e787e99e5299fa7a2d123801f09e2bc8f9aa370590a863b2d21e",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Escalation"
+      ],
+      "inheritedFrom": "pcixbspscb4d",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations",
+        "compliance.topic.escalation"
+      ],
+      "ordinal": 5,
+      "textSha256": "500a38ecffee38ea2f635a543f375f098842cd7247a1771692bb07d3d60eab13",
+      "title": "Escalation",
+      "topics": [
+        "Escalation"
+      ]
+    },
+    {
+      "anchorId": "pcixbspscb4d-2",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "pcixbspscb4d-2"
+      },
+      "category": "Operations",
+      "citationId": "GLD-pcixbspscb4d-2",
+      "classificationSignature": "f810a062e7cb4bf53885c7bc92cd280aff8e7e4f72cc8881a55d1bc1580345cd",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Escalation"
+      ],
+      "inheritedFrom": "pcixbspscb4d-2",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations",
+        "compliance.topic.escalation",
+        "compliance.topic.on-call"
+      ],
+      "ordinal": 6,
+      "textSha256": "5b284a0ba4ef41e22f76830c72ee96cd2ad173c745a1b049c132f137de405d1e",
+      "title": "Escalation",
+      "topics": [
+        "Escalation",
+        "On-call"
+      ]
+    },
+    {
+      "anchorId": "980dzae6nmx6",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "980dzae6nmx6"
+      },
+      "category": "General",
+      "citationId": "GLD-980dzae6nmx6",
+      "classificationSignature": "3e4b2bc981b46f322e8509183733a78122a85b7b69c5091021661a32db2d0d9f",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Style Notes"
+      ],
+      "inheritedFrom": "980dzae6nmx6",
+      "injectionFlags": [],
+      "marketFlags": [
+        "EMEA"
+      ],
+      "matchedRules": [
+        "compliance.exclusion.style-guide",
+        "compliance.market.emea",
+        "compliance.topic.residency"
+      ],
+      "ordinal": 7,
+      "textSha256": "2799b95aa5bbfb0dbde41ae7484b53a75459e942e7ab289506aef728eda26d9a",
+      "title": "Style Notes",
+      "topics": [
+        "Residency"
+      ]
+    },
+    {
+      "anchorId": "51ku2v6powxq",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "51ku2v6powxq"
+      },
+      "category": "General",
+      "citationId": "GLD-51ku2v6powxq",
+      "classificationSignature": "2b856ee36084af2a065c039f699ac4adb6b9c9ea534ea011d248d3e59dbce5e7",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Notes From Support"
+      ],
+      "inheritedFrom": "51ku2v6powxq",
+      "injectionFlags": [
+        "instruction-override",
+        "prompt-reference"
+      ],
+      "marketFlags": [],
+      "matchedRules": [
+        "classifier.injection.instruction-override",
+        "classifier.injection.prompt-reference"
+      ],
+      "ordinal": 8,
+      "textSha256": "fe5a9b34794b667204fa7e742a6359cfdaa0ca23a8b562ca68e7ca3208a3e127",
+      "title": "Notes From Support",
+      "topics": []
+    },
+    {
+      "anchorId": "ehid36y3e1x7",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "unchanged",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "ehid36y3e1x7"
+      },
+      "category": "General",
+      "citationId": "GLD-ehid36y3e1x7",
+      "classificationSignature": "c0932b597310e72abd7b073a519deedc8b8878a164e94ba4e24d7515d4827b86",
+      "decision": "unchanged",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Data Handling Policy",
+        "Miscellany"
+      ],
+      "inheritedFrom": "ehid36y3e1x7",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 9,
+      "textSha256": "370580d7c36eecdc73d596edeb5a2f82f2dd685d6a4d51f9cd19153ac8aed459",
+      "title": "Miscellany",
+      "topics": []
+    }
+  ],
+  "versionClassificationSignature": "e836a0ae3d2915e3aac373475431a0574dd9e7c701c65304324e988a303da2a6"
+}

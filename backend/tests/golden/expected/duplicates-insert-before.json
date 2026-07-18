@@ -1,0 +1,121 @@
+{
+  "finalizationTarget": "cft1:85163b606e06c1b681ebdfe03199b9022e3384cd297ffdc20ec79f414f5b805b",
+  "fixture": "duplicates-insert-before",
+  "manifestSha256": "5187d667954961335ea8be5217fd91f08c18c2a267c1365d9b6d999720ed9866",
+  "sections": [
+    {
+      "anchorId": "bkr5dernwcgi-4",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "minted",
+        "inheritance": "content-match-v1"
+      },
+      "category": "General",
+      "citationId": "GLD-bkr5dernwcgi-4",
+      "classificationSignature": "54a703ebacdea926ddfcbc6f8c750d63d0b5a5dc51cb259e5f6eb834052b9afe",
+      "decision": "minted",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Runbook",
+        "Checklist"
+      ],
+      "inheritedFrom": null,
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [],
+      "ordinal": 0,
+      "textSha256": "c41bff27c4eee0d6c7d4b14a598fd0b3e95a8d7cea109d37d7081c8437562ca8",
+      "title": "Checklist",
+      "topics": []
+    },
+    {
+      "anchorId": "bkr5dernwcgi",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "reattached-exact",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "bkr5dernwcgi"
+      },
+      "category": "Operations",
+      "citationId": "GLD-bkr5dernwcgi",
+      "classificationSignature": "aac361f65f170d4e069d4fd3b915c1cca18a4e1326eaf2cbdbeb130b1b9031e5",
+      "decision": "reattached-exact",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Runbook",
+        "Checklist"
+      ],
+      "inheritedFrom": "bkr5dernwcgi",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations"
+      ],
+      "ordinal": 1,
+      "textSha256": "c1f9a6cc471a76ae5efc0b4026eb27fac20bdaa27e509e486c2b035aa27e5ccf",
+      "title": "Checklist",
+      "topics": []
+    },
+    {
+      "anchorId": "bkr5dernwcgi-2",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "reattached-exact",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "bkr5dernwcgi-2"
+      },
+      "category": "Operations",
+      "citationId": "GLD-bkr5dernwcgi-2",
+      "classificationSignature": "a6ee318b8c29f7e30c76c0d7fc2f8d200d8dee706e427acd340f8b93d93c0c6f",
+      "decision": "reattached-exact",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Runbook",
+        "Checklist"
+      ],
+      "inheritedFrom": "bkr5dernwcgi-2",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations"
+      ],
+      "ordinal": 2,
+      "textSha256": "c1f9a6cc471a76ae5efc0b4026eb27fac20bdaa27e509e486c2b035aa27e5ccf",
+      "title": "Checklist",
+      "topics": []
+    },
+    {
+      "anchorId": "bkr5dernwcgi-3",
+      "anchorProvenance": {
+        "algo": "heading-path-v1",
+        "decision": "reattached-exact",
+        "inheritance": "content-match-v1",
+        "inheritedFrom": "bkr5dernwcgi-3"
+      },
+      "category": "Operations",
+      "citationId": "GLD-bkr5dernwcgi-3",
+      "classificationSignature": "09b66274263a3873c47bf69258c51c83a606a663f4731c8a8c61732f3fe187d2",
+      "decision": "reattached-exact",
+      "hasOmittedContent": false,
+      "hasTables": false,
+      "headingPath": [
+        "Runbook",
+        "Checklist"
+      ],
+      "inheritedFrom": "bkr5dernwcgi-3",
+      "injectionFlags": [],
+      "marketFlags": [],
+      "matchedRules": [
+        "compliance.category.operations"
+      ],
+      "ordinal": 3,
+      "textSha256": "c1f9a6cc471a76ae5efc0b4026eb27fac20bdaa27e509e486c2b035aa27e5ccf",
+      "title": "Checklist",
+      "topics": []
+    }
+  ],
+  "versionClassificationSignature": "42fc3009567403dd4a889a1ec4472daa619cf291232776b8c3b0f3bdae7528c2"
+}
