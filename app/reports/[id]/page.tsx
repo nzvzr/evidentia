@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
+import DownloadDocxButton from "@/components/DownloadDocxButton";
 import { generateReportForId } from "@/data/demoReports";
 import { fetchBackendReport, fetchReportSourceAudit } from "@/lib/reportsApi";
 import type { EvidentiaReport, ReportSourceAudit } from "@/lib/types";
@@ -149,6 +150,7 @@ export default function ReportDetailPage() {
           <button onClick={() => router.push("/workspace")} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--line2)", padding: "8px 15px", borderRadius: 8, cursor: "pointer" }}>
             New report
           </button>
+          <DownloadDocxButton reportId={report.id} />
           <button onClick={openPrint} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "#fff", background: "#0a0a0b", border: "none", padding: "9px 16px", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ width: 6, height: 6, borderRadius: 1, background: "var(--accent)" }} />
             Export playbook (PDF)

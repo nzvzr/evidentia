@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.orchestrator import run_pipeline_ex
 from app.agents.section_provider import TenantCorpusError, TenantCorpusProvider, TenantRetrievalConfig
-from app.api import auth, companies, documents, personas, reports
+from app.api import auth, companies, documents, exports, personas, reports
 from app.api.deps import CompanyContext, get_company_context
 from app.api.limits import enforce_generation
 from app.core.config import get_settings
@@ -88,6 +88,9 @@ app.include_router(companies.router)
 app.include_router(documents.router)
 app.include_router(personas.router)
 app.include_router(reports.router)
+# Renderer Track R1: tenant-scoped report export (editable DOCX). Registered
+# after reports so both share the /api/reports prefix; export paths are distinct.
+app.include_router(exports.router)
 
 
 def validate_production_config(settings) -> None:
