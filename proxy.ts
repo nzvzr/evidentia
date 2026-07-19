@@ -17,7 +17,7 @@ const AUTH_PAGES = ["/login", "/register"];
 const ACCESS_COOKIE = "evidentia_at";
 const REFRESH_COOKIE = "evidentia_rt";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   const hasSession =
