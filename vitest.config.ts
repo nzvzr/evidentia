@@ -3,7 +3,12 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   test: {
-    include: ["lib/**/*.test.ts", "app/**/*.test.tsx"],
+    include: [
+      "lib/**/*.test.ts",
+      "app/**/*.test.ts",
+      "app/**/*.test.tsx",
+      "components/**/*.test.tsx",
+    ],
     environment: "node",
     environmentOptions: {
       jsdom: { url: "http://localhost:3000" },

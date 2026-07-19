@@ -472,6 +472,21 @@ class Settings(BaseSettings):
     rl_generate_ip_limit: int = 20
     rl_generate_ip_window: int = 3600
 
+    # Export limits (the DOCX renderer endpoint). Rendering is CPU-only and
+    # deterministic — no LLM spend — but it is still bounded per IP/user/tenant so
+    # a single caller cannot pin a worker producing megabytes of DOCX in a loop.
+    rl_export_user_limit: int = 60
+    rl_export_user_window: int = 3600
+    rl_export_tenant_limit: int = 120
+    rl_export_tenant_window: int = 3600
+    rl_export_ip_limit: int = 120
+    rl_export_ip_window: int = 3600
+
+    # Hard cap on a single rendered artifact. A report that projects to more bytes
+    # than this is refused rather than streamed — a safety valve against a
+    # pathological (or hostile) snapshot inflating the output.
+    evidentia_export_max_bytes: int = 12 * 1024 * 1024
+
     # Feedback is write-heavy but never spends model budget. Bound it
     # separately so feedback cannot consume generation allowance.
     rl_feedback_user_limit: int = 120

@@ -151,6 +151,28 @@ def enforce_generation(request: Request, user_id: str, company_id: str) -> None:
     )
 
 
+def enforce_export(request: Request, user_id: str, company_id: str) -> None:
+    """The rendering budget: per IP, per user, and per tenant.
+
+    Export is CPU-only (no LLM spend), so the limits are looser than generation,
+    but still bounded so one caller cannot pin a worker rendering large documents
+    in a tight loop. Enforced after authentication, so an anonymous flood is
+    rejected by the 401 first and the budget is only spent by an attributable
+    caller.
+    """
+    s = get_settings()
+    get_rate_limiter().check_all(
+        [
+            (_rule("export_ip", s.rl_export_ip_limit, s.rl_export_ip_window), get_client_ip(request)),
+            (_rule("export_user", s.rl_export_user_limit, s.rl_export_user_window), user_id),
+            (
+                _rule("export_tenant", s.rl_export_tenant_limit, s.rl_export_tenant_window),
+                company_id,
+            ),
+        ]
+    )
+
+
 def enforce_feedback(request: Request, user_id: str, company_id: str) -> None:
     """Bound tenant-private feedback writes independently from generation."""
     s = get_settings()
