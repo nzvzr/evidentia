@@ -151,6 +151,18 @@ def enforce_generation(request: Request, user_id: str, company_id: str) -> None:
     )
 
 
+def enforce_feedback(request: Request, user_id: str, company_id: str) -> None:
+    """Bound tenant-private feedback writes independently from generation."""
+    s = get_settings()
+    get_rate_limiter().check_all(
+        [
+            (_rule("feedback_ip", s.rl_feedback_ip_limit, s.rl_feedback_ip_window), get_client_ip(request)),
+            (_rule("feedback_user", s.rl_feedback_user_limit, s.rl_feedback_user_window), user_id),
+            (_rule("feedback_tenant", s.rl_feedback_tenant_limit, s.rl_feedback_tenant_window), company_id),
+        ]
+    )
+
+
 def enforce_upload(request: Request, user_id: str, company_id: str) -> None:
     """The ingestion budget: per IP, per user, and per tenant — counted before
     any multipart parsing or file reading happens, so a throttled caller costs

@@ -1,6 +1,13 @@
 "use client";
 
-import type { EvidentiaReport, ReportSourceAudit } from "./types";
+import type {
+  CitationFeedbackVerdict,
+  EvidentiaReport,
+  ItemFeedbackVerdict,
+  ReportFeedbackSnapshot,
+  ReportFeedbackVerdict,
+  ReportSourceAudit,
+} from "./types";
 
 function looksLikeReport(data: unknown): data is EvidentiaReport {
   return !!data && typeof data === "object" && "id" in data && "metrics" in data;
@@ -41,4 +48,65 @@ export async function fetchReportSourceAudit(id: string): Promise<ReportSourceAu
   } catch {
     return null;
   }
+}
+
+export async function fetchReportFeedback(id: string): Promise<ReportFeedbackSnapshot | null> {
+  try {
+    const res = await fetch(`/api/reports/${encodeURIComponent(id)}/feedback`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as ReportFeedbackSnapshot;
+    return data && Array.isArray(data.items) && Array.isArray(data.citations) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function putFeedback(path: string, body: unknown): Promise<boolean> {
+  try {
+    const res = await fetch(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function putReportFeedback(
+  id: string,
+  verdict: ReportFeedbackVerdict,
+  privateText?: string,
+): Promise<boolean> {
+  return putFeedback(`/api/reports/${encodeURIComponent(id)}/feedback`, {
+    verdict,
+    privateText: privateText?.trim() || null,
+  });
+}
+
+export function putItemFeedback(
+  id: string,
+  itemPath: string,
+  itemType: "workflow_step" | "risk" | "citation" | "suggested_action",
+  verdict: ItemFeedbackVerdict,
+): Promise<boolean> {
+  return putFeedback(`/api/reports/${encodeURIComponent(id)}/feedback/items`, {
+    itemPath,
+    itemType,
+    verdict,
+  });
+}
+
+export function putCitationFeedback(
+  id: string,
+  itemPath: string,
+  citationId: string,
+  verdict: CitationFeedbackVerdict,
+): Promise<boolean> {
+  return putFeedback(`/api/reports/${encodeURIComponent(id)}/feedback/citations`, {
+    itemPath,
+    citationId,
+    verdict,
+  });
 }

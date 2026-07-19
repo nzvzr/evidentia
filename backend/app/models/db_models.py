@@ -14,6 +14,7 @@ from typing import Any, Optional
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -596,6 +597,9 @@ class ReportEvidenceBinding(Base):
     __table_args__ = (
         UniqueConstraint("report_id", "citation_id", name="uq_report_evidence_citation"),
         UniqueConstraint("report_id", "retrieval_rank", name="uq_report_evidence_rank"),
+        UniqueConstraint(
+            "id", "report_id", "company_id", name="uq_report_evidence_id_report_company"
+        ),
         ForeignKeyConstraint(
             ["report_id", "company_id"],
             ["reports.id", "reports.company_id"],
@@ -637,3 +641,270 @@ class ReportEvidenceBinding(Base):
     original_filename: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
     section_title: Mapped[str] = mapped_column(String(500), nullable=False)
     heading_path: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+
+
+class ClaimPatternVersion(Base):
+    """Immutable imported identity for one released declarative ClaimSpec."""
+
+    __tablename__ = "claim_pattern_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "claim_pack_id", "claim_spec_id", "pattern_version",
+            name="uq_claim_pattern_versions_identity",
+        ),
+        Index("ix_claim_pattern_versions_release", "claim_pack_id", "release_digest"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    claim_pack_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    claim_pack_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    module_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    module_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    claim_spec_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    pattern_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    release_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    release_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    pattern_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    definition_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ReportClaimCandidate(Base):
+    __tablename__ = "report_claim_candidates"
+    __table_args__ = (
+        UniqueConstraint("report_id", "candidate_id", name="uq_report_claim_candidates_candidate"),
+        UniqueConstraint(
+            "id", "report_id", "company_id", name="uq_report_claim_candidates_id_report_company"
+        ),
+        ForeignKeyConstraint(
+            ["report_id", "company_id"], ["reports.id", "reports.company_id"],
+            name="fk_report_claim_candidates_report_company", ondelete="CASCADE",
+        ),
+        Index("ix_report_claim_candidates_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    claim_pattern_version_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("claim_pattern_versions.id", ondelete="RESTRICT"), nullable=True
+    )
+    candidate_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    claim_spec_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    pattern_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    candidate_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    proposed_statement: Mapped[str] = mapped_column(Text, nullable=False)
+    source_snapshot_digest: Mapped[str] = mapped_column(String(80), nullable=False)
+    matcher_observations: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    deterministic_features: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    proposer_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    status_before_gate: Mapped[str] = mapped_column(String(24), nullable=False)
+    appeared_in_final: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ReportClaimDecision(Base):
+    __tablename__ = "report_claim_decisions"
+    __table_args__ = (
+        UniqueConstraint("report_claim_candidate_id", name="uq_report_claim_decisions_candidate"),
+        ForeignKeyConstraint(
+            ["report_claim_candidate_id", "report_id", "company_id"],
+            ["report_claim_candidates.id", "report_claim_candidates.report_id", "report_claim_candidates.company_id"],
+            name="fk_report_claim_decisions_candidate_company", ondelete="CASCADE",
+        ),
+        Index("ix_report_claim_decisions_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_claim_candidate_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    support_score: Mapped[float] = mapped_column(Float, nullable=False)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    reason_codes: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    matched_requirements: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    missing_requirements: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    conflicting_evidence: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    accepted_binding_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    gate_policy_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    gate_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    gate_engine_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    deterministic_features: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ReportClaimEvidence(Base):
+    __tablename__ = "report_claim_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "report_claim_candidate_id", "report_evidence_binding_id",
+            name="uq_report_claim_evidence_candidate_binding",
+        ),
+        ForeignKeyConstraint(
+            ["report_claim_candidate_id", "report_id", "company_id"],
+            ["report_claim_candidates.id", "report_claim_candidates.report_id", "report_claim_candidates.company_id"],
+            name="fk_report_claim_evidence_candidate_company", ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["report_evidence_binding_id", "report_id", "company_id"],
+            ["report_evidence_bindings.id", "report_evidence_bindings.report_id", "report_evidence_bindings.company_id"],
+            name="fk_report_claim_evidence_binding_company", ondelete="CASCADE",
+        ),
+        Index("ix_report_claim_evidence_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_claim_candidate_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    report_evidence_binding_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    proposed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+    accepted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+
+
+class PatternMetric(Base):
+    __tablename__ = "pattern_metrics"
+    __table_args__ = (
+        UniqueConstraint("company_id", "claim_pattern_version_id", name="uq_pattern_metrics_scope"),
+        Index("ix_pattern_metrics_company_pattern", "company_id", "claim_pattern_version_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    claim_pattern_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("claim_pattern_versions.id", ondelete="RESTRICT"), nullable=False)
+    evaluated_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    fired_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    binding_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    insufficient_evidence_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    final_report_inclusion_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    llm_proposed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ReportFeedback(Base):
+    __tablename__ = "report_feedback"
+    __table_args__ = (
+        UniqueConstraint("report_id", "user_id", name="uq_report_feedback_user"),
+        ForeignKeyConstraint(
+            ["report_id", "company_id"], ["reports.id", "reports.company_id"],
+            name="fk_report_feedback_report_company", ondelete="CASCADE",
+        ),
+        Index("ix_report_feedback_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    private_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ItemFeedback(Base):
+    __tablename__ = "item_feedback"
+    __table_args__ = (
+        UniqueConstraint("report_id", "user_id", "item_path", name="uq_item_feedback_user_path"),
+        ForeignKeyConstraint(
+            ["report_id", "company_id"], ["reports.id", "reports.company_id"],
+            name="fk_item_feedback_report_company", ondelete="CASCADE",
+        ),
+        Index("ix_item_feedback_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    item_path: Mapped[str] = mapped_column(String(300), nullable=False)
+    item_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    edited_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class CitationFeedback(Base):
+    __tablename__ = "citation_feedback"
+    __table_args__ = (
+        UniqueConstraint("report_id", "user_id", "item_path", "citation_id", name="uq_citation_feedback_user_item"),
+        ForeignKeyConstraint(
+            ["report_id", "company_id"], ["reports.id", "reports.company_id"],
+            name="fk_citation_feedback_report_company", ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["report_evidence_binding_id", "report_id", "company_id"],
+            ["report_evidence_bindings.id", "report_evidence_bindings.report_id", "report_evidence_bindings.company_id"],
+            name="fk_citation_feedback_binding_company", ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["corrected_report_evidence_binding_id", "report_id", "company_id"],
+            ["report_evidence_bindings.id", "report_evidence_bindings.report_id", "report_evidence_bindings.company_id"],
+            name="fk_citation_feedback_corrected_binding_company",
+        ),
+        CheckConstraint(
+            "verdict != 'incorrect_source' OR corrected_report_evidence_binding_id IS NOT NULL",
+            name="ck_citation_feedback_incorrect_source_binding",
+        ),
+        Index("ix_citation_feedback_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    report_evidence_binding_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    item_path: Mapped[str] = mapped_column(String(300), nullable=False)
+    citation_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(32), nullable=False)
+    corrected_report_evidence_binding_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class RetrievalMiss(Base):
+    __tablename__ = "retrieval_misses"
+    __table_args__ = (
+        UniqueConstraint(
+            "report_id", "user_id", "report_claim_candidate_id", "evidence_need_id",
+            name="uq_retrieval_misses_user_claim_need",
+        ),
+        ForeignKeyConstraint(
+            ["report_id", "company_id"], ["reports.id", "reports.company_id"],
+            name="fk_retrieval_misses_report_company", ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["report_claim_candidate_id", "report_id", "company_id"],
+            ["report_claim_candidates.id", "report_claim_candidates.report_id", "report_claim_candidates.company_id"],
+            name="fk_retrieval_misses_candidate_company", ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["corrected_section_id", "corrected_version_id", "corrected_document_id", "company_id"],
+            ["document_sections.id", "document_sections.version_id", "document_sections.document_id", "document_sections.company_id"],
+            name="fk_retrieval_misses_section_company",
+        ),
+        Index("ix_retrieval_misses_company_report", "company_id", "report_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    report_claim_candidate_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    claim_spec_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    pattern_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    evidence_need_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    corrected_section_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    corrected_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    corrected_document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    corrected_anchor_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -47,6 +47,7 @@ def rate_limiter(monkeypatch) -> RateLimiter:
     settings = get_settings()
     monkeypatch.setattr(settings, "evidentia_tenant_corpus_enabled", False)
     monkeypatch.setattr(settings, "evidentia_tenant_generation_enabled", False)
+    monkeypatch.setattr(settings, "evidentia_claim_engine_enabled", False)
     monkeypatch.setattr(settings, "evidentia_use_llm", False)
     return limiter
 

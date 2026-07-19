@@ -55,6 +55,9 @@ CLAIM_FAMILIES = frozenset({"gap", "contradiction", "staleness", "assertion"})
 
 # Evidence gate decisions (§5, EvidenceBinding v1).
 EVIDENCE_DECISIONS = frozenset({"accepted", "insufficient"})
+CLAIM_DECISIONS = frozenset({"accepted", "rejected", "insufficient_evidence"})
+CLAIM_CANDIDATE_SOURCES = frozenset({"deterministic_pattern", "llm_proposal"})
+CLAIM_CANDIDATE_STATUSES = frozenset({"proposed"})
 
 # Raw-document source types (L1). Connectors extend this additively
 # ("connector:<name>"), which is why it is validated as a prefix rule, not an enum.
@@ -276,10 +279,10 @@ class ClaimSpec:
     executable code; the engine executes typed matcher primitives against these
     fields and never contains domain vocabulary itself.
 
-    The ``triggers`` / ``evidence`` / ``exclusions`` / ``templates`` /
-    ``severity_policy`` payloads stay loosely typed until M5a lands the pattern
-    loader + schema validation that firms them up against the matcher
-    primitives (§4-A). The identity and family fields are binding now.
+    The legacy ``triggers`` / ``evidence`` / ``exclusions`` / ``templates`` /
+    ``severity_policy`` mappings remain for compatibility with reserved M1
+    callers. M5a's loader strictly compiles the fields below from validated
+    ``claim-patterns-v1`` data.
     """
 
     contract_version: ClassVar[int] = 1
@@ -293,6 +296,19 @@ class ClaimSpec:
     exclusions: Mapping[str, Any] = field(default_factory=dict)
     templates: Mapping[str, Any] = field(default_factory=dict)
     severity_policy: Mapping[str, Any] = field(default_factory=dict)
+    # M5a compiled fields. The original M1 mappings above remain compatible
+    # with callers that constructed the reserved contract directly.
+    title: str = ""
+    claim_type: str = "assertion"
+    priority_hint: Optional[str] = None
+    evidence_needs: Tuple[Mapping[str, Any], ...] = ()
+    matcher: Mapping[str, Any] = field(default_factory=dict)
+    gate_policy_id: str = ""
+    gate_policy_version: str = ""
+    output_metadata: Mapping[str, Any] = field(default_factory=dict)
+    enabled: bool = True
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+    pattern_digest: str = ""
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "ClaimSpec.id is required")
@@ -302,15 +318,23 @@ class ClaimSpec:
             f"unknown ClaimSpec family {self.family!r}; expected one of {sorted(CLAIM_FAMILIES)}",
         )
 
+    @property
+    def claim_spec_id(self) -> str:
+        return self.id
+
+    @property
+    def pattern_version(self) -> str:
+        return self.version
+
 
 # --------------------------------------------------------------------------- #
-# Stubs — shapes reserved now, firmed up by the milestone that produces them
+# Claim proposal and decision contracts (M5a); later CAD shapes remain reserved
 # --------------------------------------------------------------------------- #
 
 
 @dataclass(frozen=True)
 class ClaimCandidate:
-    """[stub — produced by L6 from M5a] A proposal, never a conclusion: it must
+    """An L6 proposal, never a conclusion: it must
     pass the L7 gate to exist as a claim. Exactly one of ``spec_ref`` (pattern
     id+version) or ``proposer_ref`` (llm: model, prompt version) identifies the
     candidate source."""
@@ -322,12 +346,61 @@ class ClaimCandidate:
     candidate_sections: Tuple[SectionRef, ...] = ()
     slots: Mapping[str, Any] = field(default_factory=dict)
     proposed_severity: Optional[str] = None
+    candidate_id: str = ""
+    claim_spec_id: str = ""
+    pattern_version: str = ""
+    proposed_statement: str = ""
+    source_snapshot_id: str = ""
+    source_snapshot_digest: str = ""
+    proposed_binding_ids: Tuple[str, ...] = ()
+    matcher_observations: Tuple[Mapping[str, Any], ...] = ()
+    deterministic_features: Mapping[str, float] = field(default_factory=dict)
+    proposer_metadata: Optional[Mapping[str, str]] = None
+    candidate_source: str = "deterministic_pattern"
+    status: str = "proposed"
 
     def __post_init__(self) -> None:
         _require(
             (self.spec_ref is None) != (self.proposer_ref is None),
             "ClaimCandidate requires exactly one of spec_ref or proposer_ref",
         )
+        _require(
+            self.candidate_source in CLAIM_CANDIDATE_SOURCES,
+            f"unknown candidate source {self.candidate_source!r}",
+        )
+        _require(self.status in CLAIM_CANDIDATE_STATUSES, "candidate status must be proposed")
+
+
+@dataclass(frozen=True)
+class ClaimDecision:
+    """Versioned deterministic L7 gate result.
+
+    Only accepted decisions may project into report items. Rejected and
+    insufficient decisions remain report-local audit provenance.
+    """
+
+    contract_version: ClassVar[int] = 1
+
+    candidate_id: str
+    decision: str
+    support_score: float
+    threshold: float
+    reason_codes: Tuple[str, ...]
+    matched_requirements: Tuple[str, ...]
+    missing_requirements: Tuple[str, ...]
+    conflicting_evidence: Tuple[str, ...]
+    accepted_binding_ids: Tuple[str, ...]
+    gate_policy_id: str
+    gate_policy_version: str
+    gate_engine_version: str
+    deterministic_features: Mapping[str, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _require(self.decision in CLAIM_DECISIONS, f"unknown claim decision {self.decision!r}")
+        _require(0.0 <= self.support_score <= 1.0, "support_score must be between 0 and 1")
+        _require(0.0 <= self.threshold <= 1.0, "threshold must be between 0 and 1")
+        if self.decision == "accepted":
+            _require(bool(self.accepted_binding_ids), "accepted claims require an evidence binding")
 
 
 @dataclass(frozen=True)

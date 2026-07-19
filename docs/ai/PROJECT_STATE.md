@@ -1,102 +1,70 @@
 # Evidentia — Project State
 
-_Concise snapshot. Last updated: 2026-07-18. M4 diff is uncommitted._
+_Concise snapshot. Last updated: 2026-07-19. Corrected M5a diff is uncommitted._
 
 ## Current milestone
 
-M4 tenant-corpus report generation is implemented and live-smoke verified on
-PostgreSQL 16. Authenticated generation now consumes only the active company's
-eligible finalized M3 versions. Anonymous `/api/demo/generate-workflow` remains
-sample-only, anonymous and non-persistent. There is no tenant/demo fallback or
-mixing.
+M5a's bounded claim-engine plumbing is implemented on top of M4 behind the
+default-off `EVIDENTIA_CLAIM_ENGINE_ENABLED` rollout flag. Flag off remains the
+exact M4 path; demo generation is unchanged. The public `EvidentiaReport` remains
+exactly 20 keys.
 
-The public 20-key `EvidentiaReport` JSON is unchanged. Tenant audit provenance
-is persisted separately and returned from tenant-scoped
-`GET /api/reports/{id}/sources`.
+## Corrected M5a architecture
 
-## M4 architecture
+- Declarative `compliance.claim-patterns@1.0.0` lives independently under
+  `backend/app/modules/compliance/claim-patterns/1.0.0/`. The released M3
+  `compliance/1.0.0` directory remains its exact three-file HEAD layout and digest.
+- Every deterministic and LLM candidate is evaluated against the complete bounded
+  frozen M4 evidence set. LLM citations are hints only; conflict and required-
+  support matchers always see the full set.
+- Gate score, binding count, source diversity and accepted provenance use only
+  bindings attributed to successful support observations. Conflict bindings stay
+  visible in audit observations and are never accepted support.
+- `claim-patterns-v1` rejects nested `evidence_count` and the unwired `comparison`
+  primitive. Matcher trees and execution have depth, node, evidence/text and
+  candidate-wide primitive-evaluation budgets. Decimal conversion is string-
+  canonical and release loading remains strict and atomic.
+- Claim-engine mode has one accepted-only projection for workflow, risks,
+  recommendations, summary and top finding. Rejected/insufficient claims are
+  audit-only. Zero accepted claims produce empty analytical arrays and an honest
+  no-accepted-claim narrative.
+- Full-mode analytical refinement is atomic: any exception restores persona,
+  workflow, risks, actions, narrative, claim run and inclusion intent to the
+  deterministic baseline and reports deterministic mode.
 
-- Explicit `DemoCorpusProvider` and `TenantCorpusProvider`; the provider is
-  injected once into the existing orchestrator. The authenticated route always
-  selects tenant; the public Next route always selects demo.
-- `EVIDENTIA_TENANT_GENERATION_ENABLED=false` is a dedicated safe rollout flag.
-  Disabled, empty, ineligible, retrieval and evidence failures are typed; none
-  can substitute sample evidence.
-- Tenant selection starts at each non-deleted document's exact
-  `current_version_id` and calls the committed M3
-  `check_generation_eligibility` predicate. Transitional, unsupported or
-  malformed versions fail closed.
-- Retrieval is deterministic `tenant-lexical-v1`: normalized lexical weighting,
-  stable score/identity tie-breaks, and exact full-text scoring before global
-  candidate truncation. Canonically streamed per-document top-k accumulation
-  keeps late sections eligible with bounded memory and diversity; explicit
-  document/candidate/section/character/excerpt limits remain. Snapshot digest
-  `tcs1` binds tenant, sorted version ids, manifests, retrieval version and
-  configuration.
-- Exact version/section objects are frozen and the report/source/evidence plan is
-  committed before optional LLM work; generation never re-follows the current
-  pointer and holds no transaction across an LLM call.
-- Tenant source text is untrusted quoted evidence. LLM evidence is delimited,
-  case-insensitive closing sentinels are encoded only in the prompt view,
-  instruction-following is prohibited, prompt input is bounded, and final
-  citation ids/display data must match the report-local allow-list exactly.
-  Narrative citation checks are scoped to active tenant and reserved demo
-  namespaces, leaving ordinary standards/version tokens untouched.
-- LLM-off produces a deterministic tenant-grounded report. LLM metadata records
-  actual execution. Any per-step LLM fallback stays grounded in the same frozen
-  tenant evidence.
-- Migration `e4b7c9d2a610` adds report provenance columns,
-  `report_source_versions`, `report_evidence_bindings`, and tenant-safe composite
-  keys/FKs/uniqueness/indexes. Existing reports become completed demo rows with
-  no fabricated bindings.
-- Document deletion is soft deletion: future retrieval excludes the document,
-  while completed report provenance remains auditable with bounded excerpts.
+## Persistence and feedback
 
-## User-facing behavior
-
-- Authenticated Next BFF generation proxies FastAPI only and forwards M4 typed
-  errors. `/running` labels `Tenant corpus`, provides the finalization action for
-  empty/ineligible corpora, and never calls the demo endpoint.
-- Documents distinguish `Awaiting finalization`, `Citation-ready`, and
-  `Finalized · unavailable`, using the backend's exact eligibility result.
-- Reports show deterministic/LLM truthfully, tenant/sample corpus, exact citation
-  version/section data, bounded excerpts and compact retrieval/snapshot audit.
-  Old demo reports remain readable.
+- Migration `f5a6c7d8e9b0` records exact claim-pack id/version/digest separately
+  from the target M3 module, plus report-local candidates, decisions, evidence,
+  metrics and feedback.
+- Feedback paths use canonical indexes (`0|[1-9][0-9]*`) and validate item type and
+  persisted report shape.
+- Corrected citation anchors resolve to exact report-local evidence bindings.
+  Composite report/company SQL foreign keys reject another report, another source
+  version outside the frozen binding set and cross-tenant direct writes.
 
 ## Verification
 
-- Post-review focused SQLite M4 + persistence: **30 passed**, including exact
-  delimiter injection, ISO-27001/SOC-2/PCI-DSS-4.0, ordinal >500, 50 documents,
-  insertion-order/hash-seed determinism, limits/diversity and split error codes.
-- PostgreSQL 16 required target: **197 passed**. Complete PostgreSQL backend:
-  **810 passed**, including real concurrency/worker locking and the dual-backend
-  migration matrix.
-- Live PostgreSQL API/worker smoke: A and B uploaded/finalized real documents;
-  deterministic tenant reports persisted 2 source snapshots and 2 bindings;
-  `ZORBLAX-999-A/B` remained isolated; cross-tenant audit was 404; empty and
-  disabled codes were correct.
-- Production anonymous Next smoke: 200, `X-Evidentia-Demo: true`, deterministic,
-  eight sample citations, neither tenant marker.
-- Frontend: Vitest **55 passed**; TypeScript passed; Next production build passed;
-  ESLint **0 errors / 6 pre-existing hook warnings**.
-- Data-bearing M3→M4→M3→M4 passed SQLite and PostgreSQL. Fresh-head Alembic check
-  on both reports only the four documented legacy auth nullable differences;
-  zero M4 drift.
-- Full backend SQLite: **780 passed, 11 skipped**.
-
-## Preserved invariants
-
-M3 anchors/citation identities, finalization algorithms, manifests and golden
-fixtures were not changed. Final versions remain immutable; finalization still
-creates a successor. No PDF/DOCX/OCR, embeddings/vector DB, external search,
-shared corpora, claims ledger or public-schema extension was introduced.
+- Focused corrected M5a engine/feedback/live/migration: **70 passed** on SQLite;
+  PostgreSQL-specific live smoke: **3 passed**; the dual-engine focused matrix
+  runs **71 passed**.
+- Full SQLite: **833 passed, 11 skipped, 17 failed** in 237.26s. Full PostgreSQL
+  16, confirmed `dialect=postgresql`: **864 passed, 0 skipped, 17 failed** in
+  656.00s. Every failure on both engines is one of the deferred goldens below;
+  all concurrency tests ran on PostgreSQL.
+- Data-bearing M4→M5a→M4→M5a cycles pass SQLite and PostgreSQL, including hostile
+  same-tenant other-report, cross-tenant and missing corrected-binding writes.
+- Fresh-head Alembic checks on both engines show only the four documented legacy
+  auth nullability differences and zero M5a drift.
+- Frontend: **56 passed**; `tsc --noEmit`, production build and lint pass. Lint
+  reports 0 errors and 6 pre-existing hook warnings. Backend compileall passes.
+- All 17 M3 golden expected files are exact HEAD bytes and remain unmodified.
+- The pre-existing golden drift is separate: fresh M3 computation changes only
+  `manifestSha256` (for `base`, computed `ac9c70e8…` vs committed `aac8aaf6…`).
+  M5a does not fix or mask it.
 
 ## Deferred
 
-PDF/DOCX/OCR; embeddings/vector retrieval; worker lease-token fencing for future
-long parsers; broader claims/CAD lifecycle; external framework packs; physical
-blob-retention optimization and `documents.content_text` removal; four legacy
-auth nullable drifts; advanced selection; report regeneration/version comparison.
-M4.1: optimize `GET /api/documents` eligibility calculation and consider
-immutable-key memoization or batched eligibility evaluation. F7/F8 behavior is
-unchanged by the post-review pass.
+M5b pattern content/calibration; the pre-existing M3 golden-manifest drift;
+full CAD runtime; embeddings/FTS; OCR/PDF/DOCX; external packs/connectors;
+automatic or cross-tenant learning; advanced selection and regeneration.

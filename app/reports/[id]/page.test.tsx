@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateReportForId } from "@/data/demoReports";
 import type { ReportSourceAudit } from "@/lib/types";
 import ReportDetailPage from "./page";
@@ -10,6 +10,15 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   fetchReport: vi.fn(),
   fetchAudit: vi.fn(),
+  fetchFeedback: vi.fn(),
+  putReportFeedback: vi.fn(),
+  putItemFeedback: vi.fn(),
+  putCitationFeedback: vi.fn(),
+  session: {
+    user: { id: "user-a" },
+    activeCompany: { id: "company-a" },
+    status: "authenticated",
+  },
 }));
 
 vi.mock("next/navigation", () => ({
@@ -21,9 +30,17 @@ vi.mock("@/components/AppShell", () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("@/components/SessionProvider", () => ({
+  useSession: () => mocks.session,
+}));
+
 vi.mock("@/lib/reportsApi", () => ({
   fetchBackendReport: mocks.fetchReport,
   fetchReportSourceAudit: mocks.fetchAudit,
+  fetchReportFeedback: mocks.fetchFeedback,
+  putReportFeedback: mocks.putReportFeedback,
+  putItemFeedback: mocks.putItemFeedback,
+  putCitationFeedback: mocks.putCitationFeedback,
 }));
 
 async function flush() {
@@ -36,6 +53,15 @@ async function flush() {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+beforeEach(() => {
+  mocks.session.user.id = "user-a";
+  mocks.session.activeCompany.id = "company-a";
+  mocks.fetchFeedback.mockResolvedValue({ report: null, items: [], citations: [] });
+  mocks.putReportFeedback.mockResolvedValue(true);
+  mocks.putItemFeedback.mockResolvedValue(true);
+  mocks.putCitationFeedback.mockResolvedValue(true);
 });
 
 describe("ReportDetailPage source truth", () => {
@@ -127,5 +153,31 @@ describe("ReportDetailPage source truth", () => {
 
     expect(screen.getByText("CORPUS UNAVAILABLE")).toBeTruthy();
     expect(screen.queryByText("SAMPLE CORPUS")).toBeNull();
+  });
+
+  it("clears tenant feedback state when the account scope changes", async () => {
+    const report = generateReportForId("report-1");
+    mocks.fetchReport.mockResolvedValue(report);
+    mocks.fetchAudit.mockResolvedValue(null);
+    mocks.fetchFeedback.mockResolvedValueOnce({
+      report: { verdict: "correct_useful", privateText: "Tenant A note" },
+      items: [],
+      citations: [],
+    }).mockResolvedValueOnce({ report: null, items: [], citations: [] });
+
+    const view = render(<ReportDetailPage />);
+    await flush();
+    expect(screen.getByRole("button", { name: "Correct & useful" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByLabelText("Private feedback note")).toHaveProperty("value", "Tenant A note");
+
+    mocks.session.user.id = "user-b";
+    mocks.session.activeCompany.id = "company-b";
+    view.rerender(<ReportDetailPage />);
+    expect(screen.queryByText("Tenant A note")).toBeNull();
+    await flush();
+
+    expect(screen.getByRole("button", { name: "Correct & useful" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByLabelText("Private feedback note")).toHaveProperty("value", "");
+    expect(mocks.fetchFeedback).toHaveBeenCalledTimes(2);
   });
 });

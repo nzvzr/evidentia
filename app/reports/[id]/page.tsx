@@ -1,11 +1,26 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
+import { useSession } from "@/components/SessionProvider";
 import { generateReportForId } from "@/data/demoReports";
-import { fetchBackendReport, fetchReportSourceAudit } from "@/lib/reportsApi";
-import type { EvidentiaReport, ReportSourceAudit } from "@/lib/types";
+import {
+  fetchBackendReport,
+  fetchReportFeedback,
+  fetchReportSourceAudit,
+  putCitationFeedback,
+  putItemFeedback,
+  putReportFeedback,
+} from "@/lib/reportsApi";
+import type {
+  CitationFeedbackVerdict,
+  EvidentiaReport,
+  ItemFeedbackVerdict,
+  ReportFeedbackSnapshot,
+  ReportFeedbackVerdict,
+  ReportSourceAudit,
+} from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -42,31 +57,58 @@ function formatStamp(iso: string): string {
 
 export default function ReportDetailPage() {
   const router = useRouter();
+  const { user, activeCompany, status: sessionStatus } = useSession();
   const params = useParams<{ id: string }>();
   const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
+  const sessionScope = `${user?.id ?? "anonymous"}:${activeCompany?.id ?? "none"}`;
+  const scopeRef = useRef(sessionScope);
 
   const [report, setReport] = useState<EvidentiaReport | null>(null);
   const [sourceAudit, setSourceAudit] = useState<ReportSourceAudit | null>(null);
+  const [feedback, setFeedback] = useState<ReportFeedbackSnapshot | null>(null);
+  const [reportVerdict, setReportVerdict] = useState<ReportFeedbackVerdict | "">("");
+  const [privateText, setPrivateText] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState("");
+  const [savingFeedback, setSavingFeedback] = useState<string | null>(null);
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
   const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
+    scopeRef.current = sessionScope;
+  }, [sessionScope]);
+
+  useEffect(() => {
     let cancelled = false;
+    if (sessionStatus !== "authenticated") return;
     // The backend is the only source of truth. A 404 means the report does not
     // exist *for this tenant* — we must NOT fall back to a locally cached or
     // locally generated report, which is how another account's data (or a fake
     // report) could be rendered as if it were real.
     (async () => {
-      const [backendReport, audit] = await Promise.all([
+      const [backendReport, audit, currentFeedback] = await Promise.all([
         fetchBackendReport(id),
         fetchReportSourceAudit(id),
+        fetchReportFeedback(id),
       ]);
       if (cancelled) return;
       if (backendReport) {
         setReport(backendReport);
         setSourceAudit(audit);
+        setFeedback(currentFeedback);
+        setReportVerdict(currentFeedback?.report?.verdict ?? "");
+        setPrivateText(currentFeedback?.report?.privateText ?? "");
+        setLoadedScope(sessionScope);
         setState("ready");
       } else {
+        setReport(null);
+        setSourceAudit(null);
+        setFeedback(null);
+        setReportVerdict("");
+        setPrivateText("");
+        setFeedbackStatus("");
+        setSavingFeedback(null);
+        setLoadedScope(sessionScope);
         setState("missing");
       }
     })();
@@ -75,16 +117,58 @@ export default function ReportDetailPage() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [id]);
+  }, [id, sessionScope, sessionStatus]);
 
-  if (state !== "ready" || !report) {
+  const reloadFeedback = async (startedScope: string) => {
+    const current = await fetchReportFeedback(id);
+    if (scopeRef.current === startedScope) setFeedback(current);
+  };
+
+  const saveReportVerdict = async () => {
+    if (!reportVerdict) return;
+    const startedScope = sessionScope;
+    setSavingFeedback("report");
+    setFeedbackStatus("");
+    const ok = await putReportFeedback(id, reportVerdict, privateText);
+    if (scopeRef.current !== startedScope) return;
+    if (ok) await reloadFeedback(startedScope);
+    setSavingFeedback(null);
+    setFeedbackStatus(ok ? "Feedback saved privately to your organization." : "Feedback could not be saved.");
+  };
+
+  const saveItemVerdict = async (path: string, verdict: ItemFeedbackVerdict) => {
+    const startedScope = sessionScope;
+    setSavingFeedback(path);
+    const ok = await putItemFeedback(id, path, "risk", verdict);
+    if (scopeRef.current !== startedScope) return;
+    if (ok) await reloadFeedback(startedScope);
+    setSavingFeedback(null);
+    setFeedbackStatus(ok ? "Item feedback saved." : "Item feedback could not be saved.");
+  };
+
+  const saveCitationVerdict = async (
+    path: string,
+    citationId: string,
+    verdict: CitationFeedbackVerdict,
+  ) => {
+    const startedScope = sessionScope;
+    setSavingFeedback(path);
+    const ok = await putCitationFeedback(id, path, citationId, verdict);
+    if (scopeRef.current !== startedScope) return;
+    if (ok) await reloadFeedback(startedScope);
+    setSavingFeedback(null);
+    setFeedbackStatus(ok ? "Citation feedback saved." : "Citation feedback could not be saved.");
+  };
+
+  const loadingCurrentScope = sessionStatus === "loading" || loadedScope !== sessionScope;
+  if (state !== "ready" || !report || loadingCurrentScope) {
     return (
       <AppShell active="reports">
         <div style={{ padding: 48, maxWidth: 560 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em", margin: 0 }}>
-            {state === "loading" ? "Loading report…" : "Report not found"}
+            {state === "loading" || loadingCurrentScope ? "Loading report…" : "Report not found"}
           </h1>
-          {state === "missing" && (
+          {state === "missing" && !loadingCurrentScope && (
             <>
               <p style={{ fontSize: 13.5, color: "var(--sub)", marginTop: 10, lineHeight: 1.6 }}>
                 This report doesn&apos;t exist, or it belongs to a different organization.
@@ -266,9 +350,11 @@ export default function ReportDetailPage() {
                 <EmptyRow text="No risks met the evidence-support threshold for this corpus." />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {report.risks.map((r) => {
+                  {report.risks.map((r, riskIndex) => {
                     const color = SEV_COLORS[r.severity] ?? SEV_COLORS.Low;
                     const insufficient = isInsufficient(r.evidenceCode);
+                    const itemPath = `/risks/${riskIndex}`;
+                    const selected = feedback?.items.find((item) => item.itemPath === itemPath)?.verdict;
                     return (
                       <div key={r.title} style={{ display: "flex", gap: 14, padding: "15px 16px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--shell)", borderLeft: `3px solid ${color}` }}>
                         <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".05em", padding: "4px 8px", borderRadius: 5, height: "fit-content", flex: "none", color: "#fff", background: color }}>
@@ -281,6 +367,17 @@ export default function ReportDetailPage() {
                             <EvidenceChip code={r.evidenceCode} small />
                             <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{insufficient ? "documentation gap" : r.owner}</span>
                           </div>
+                          <FeedbackChoices
+                            label={`Risk ${riskIndex + 1} feedback`}
+                            choices={[
+                              ["accepted", "Accept"],
+                              ["rejected", "Reject"],
+                              ["insufficient_evidence", "Insufficient"],
+                            ]}
+                            selected={selected}
+                            disabled={savingFeedback === itemPath}
+                            onChoose={(value) => void saveItemVerdict(itemPath, value as ItemFeedbackVerdict)}
+                          />
                         </div>
                       </div>
                     );
@@ -348,6 +445,13 @@ export default function ReportDetailPage() {
                           </div>
                         )}
                         <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5, fontStyle: "italic" }}>&ldquo;{c.excerpt}&rdquo;</div>
+                        <FeedbackChoices
+                          label={`Citation ${c.id} feedback`}
+                          choices={[["correct", "Correct"], ["irrelevant", "Irrelevant"]]}
+                          selected={feedback?.citations.find((item) => item.itemPath === `/citations/${i}` && item.citationId === c.id)?.verdict}
+                          disabled={savingFeedback === `/citations/${i}`}
+                          onChoose={(value) => void saveCitationVerdict(`/citations/${i}`, c.id, value as CitationFeedbackVerdict)}
+                        />
                       </div>
                     </div>
                   ))}
@@ -389,6 +493,41 @@ export default function ReportDetailPage() {
             </div>
           </div>
         </div>
+
+        <Card>
+          <SectionLabel>REPORT FEEDBACK</SectionLabel>
+          <p style={{ fontSize: 13, color: "var(--sub)", lineHeight: 1.5, margin: "0 0 14px" }}>
+            Feedback is private to your organization and does not automatically change claim patterns or thresholds.
+          </p>
+          <FeedbackChoices
+            label="Overall report feedback"
+            choices={[["correct_useful", "Correct & useful"], ["partially_correct", "Partially correct"], ["incorrect", "Incorrect"]]}
+            selected={reportVerdict || undefined}
+            disabled={savingFeedback === "report"}
+            onChoose={(value) => setReportVerdict(value as ReportFeedbackVerdict)}
+          />
+          <label style={{ display: "block", fontSize: 12.5, color: "var(--ink2)", marginTop: 14 }}>
+            Private note (optional)
+            <textarea
+              aria-label="Private feedback note"
+              value={privateText}
+              maxLength={2000}
+              onChange={(event) => setPrivateText(event.target.value)}
+              style={{ display: "block", width: "100%", minHeight: 74, resize: "vertical", marginTop: 7, border: "1px solid var(--line2)", borderRadius: 8, padding: 10, font: "inherit", fontSize: 13, background: "var(--paper)", color: "var(--ink)" }}
+            />
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+            <button
+              type="button"
+              disabled={!reportVerdict || savingFeedback === "report"}
+              onClick={() => void saveReportVerdict()}
+              style={{ border: 0, borderRadius: 7, padding: "8px 13px", background: "#0a0a0b", color: "#fff", font: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", opacity: !reportVerdict || savingFeedback === "report" ? .55 : 1 }}
+            >
+              {savingFeedback === "report" ? "Saving…" : "Save feedback"}
+            </button>
+            <span role="status" style={{ fontSize: 12, color: "var(--sub)" }}>{feedbackStatus}</span>
+          </div>
+        </Card>
       </div>
 
       <style jsx global>{`
@@ -450,6 +589,37 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em", marginBottom: 16 }}>
       {children}
+    </div>
+  );
+}
+
+function FeedbackChoices({
+  label,
+  choices,
+  selected,
+  disabled,
+  onChoose,
+}: {
+  label: string;
+  choices: Array<[string, string]>;
+  selected?: string;
+  disabled?: boolean;
+  onChoose: (value: string) => void;
+}) {
+  return (
+    <div aria-label={label} style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+      {choices.map(([value, text]) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={selected === value}
+          disabled={disabled}
+          onClick={() => onChoose(value)}
+          style={{ border: `1px solid ${selected === value ? "var(--ink)" : "var(--line2)"}`, borderRadius: 6, padding: "5px 8px", background: selected === value ? "var(--ink)" : "var(--paper)", color: selected === value ? "var(--paper)" : "var(--sub)", font: "inherit", fontSize: 10.5, cursor: "pointer", opacity: disabled ? .55 : 1 }}
+        >
+          {text}
+        </button>
+      ))}
     </div>
   );
 }
