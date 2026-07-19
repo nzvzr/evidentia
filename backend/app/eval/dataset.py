@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-BENCHMARK_VERSION = "v1"
+BENCHMARK_VERSION = "v2"
 
 # Document slugs available in the demo corpus.
 SEC = "security-compliance-whitepaper"

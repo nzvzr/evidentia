@@ -15,6 +15,7 @@ from app.agents.section_provider import (
     TenantCorpusProvider,
 )
 from app.models.db_models import Report, ReportEvidenceBinding, ReportSourceVersion
+from app.repositories.claims import persist_claim_run
 
 _DEMO_CITATION_PREFIXES = frozenset({"DEMO"})
 
@@ -107,6 +108,36 @@ def _engine_versions(provider: TenantCorpusProvider, telemetry: Optional[Dict[st
             "provider": telemetry.get("provider"),
             "model": telemetry.get("model"),
             "promptVersion": telemetry.get("promptVersion"),
+        }
+    claim = telemetry.get("claimEngine") or {}
+    if claim.get("enabled"):
+        result["modules"] = [{"id": "compliance", "version": "1.0.0"}]
+        result["patternLibrary"] = {
+            "id": claim.get("claimPackId"),
+            "schemaVersion": claim.get("schemaVersion"),
+            "version": claim.get("releaseVersion"),
+            "digest": claim.get("releaseDigest"),
+            "matcherEngineVersion": claim.get("matcherEngineVersion"),
+        }
+        result["thresholdPolicy"] = {
+            "gateEngineVersion": claim.get("gateEngineVersion"),
+            "policies": [
+                {
+                    "claimSpecId": claim_spec_id,
+                    "policyId": policy_id,
+                    "policyVersion": policy_version,
+                    "threshold": threshold,
+                }
+                for claim_spec_id, policy_id, policy_version, threshold in sorted({
+                    (
+                        decision.get("claimSpecId"),
+                        decision.get("gatePolicyId"),
+                        decision.get("gatePolicyVersion"),
+                        decision.get("threshold"),
+                    )
+                    for decision in claim.get("decisions", [])
+                })
+            ],
         }
     return result
 
@@ -310,6 +341,14 @@ def complete_generation_run(
     )
     for binding in bindings:
         binding.cited_in_final = binding.citation_id in cited
+    claim_run = telemetry.get("_claimRunResult")
+    if claim_run is not None:
+        persist_claim_run(
+            db,
+            report=row,
+            claim_run=claim_run,
+            included_candidate_ids=set(telemetry.get("_includedClaimCandidateIds") or []),
+        )
     db.commit()
     db.refresh(row)
     return row

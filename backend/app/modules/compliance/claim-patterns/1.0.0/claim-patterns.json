@@ -1,0 +1,189 @@
+{
+  "schemaVersion": "claim-patterns-v1",
+  "claimPackId": "compliance.claim-patterns",
+  "releaseVersion": "1.0.0",
+  "moduleId": "compliance",
+  "moduleVersion": "1.0.0",
+  "provenance": {
+    "releasedAt": "2026-07-18",
+    "changelog": "Initial bounded M5a demonstration release; not comprehensive compliance coverage.",
+    "fixturePack": "claim-fixtures.json"
+  },
+  "gatePolicies": [
+    {
+      "id": "deterministic-support-standard",
+      "version": "1.0.0",
+      "acceptThreshold": 0.75,
+      "rejectBelow": 0.3,
+      "weights": {
+        "requirementCoverage": 0.55,
+        "matcherSupport": 0.15,
+        "bindingCount": 0.1,
+        "sourceDiversity": 0.05,
+        "obligation": 0.15,
+        "contradictionPenalty": 1.0
+      }
+    }
+  ],
+  "patterns": [
+    {
+      "id": "compliance.administrative-access-mfa",
+      "version": "1.0.0",
+      "title": "Administrative access requires multi-factor authentication",
+      "family": "assertion",
+      "claimType": "control_requirement",
+      "priorityHint": "High",
+      "enabled": true,
+      "matcher": {"primitive": "all_of", "children": [
+        {"primitive": "token_any", "terms": ["administrative", "administrator", "privileged"]},
+        {"primitive": "token_any", "terms": ["mfa", "multi-factor authentication", "multifactor authentication"]}
+      ]},
+      "evidenceNeeds": [
+        {"id": "access-scope", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["administrative", "administrator", "privileged"]}},
+        {"id": "mfa-control", "required": true, "weight": 1.5, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["mfa", "multi-factor authentication", "multifactor authentication"]}},
+        {"id": "mandatory-language", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "obligation_term", "terms": ["must", "shall", "required", "requires"]}},
+        {"id": "conflict-negation", "required": false, "weight": 1.0, "purpose": "conflict", "matcher": {"primitive": "proximity", "left": ["not", "without", "optional", "exempt"], "right": ["mfa", "authentication"], "maxTokens": 6}}
+      ],
+      "gatePolicy": {"id": "deterministic-support-standard", "version": "1.0.0"},
+      "output": {"kind": "risk", "statement": "Administrative access requires multi-factor authentication.", "severity": "High", "title": "Administrative MFA requirement requires implementation assurance", "description": "The policy requires MFA for administrative or privileged access; implementation evidence should be verified.", "businessImpact": "A documented control without implementation assurance can leave privileged access exposed.", "recommendedFix": "Verify enforcement and retain current MFA configuration evidence.", "owner": "Security"},
+      "provenance": {"changelog": "Initial M5a control pattern.", "fixtures": ["administrative-access-mfa"]}
+    },
+    {
+      "id": "compliance.privileged-access-periodic-review",
+      "version": "1.0.0",
+      "title": "Privileged access is periodically reviewed",
+      "family": "assertion",
+      "claimType": "control_operation",
+      "priorityHint": "Medium",
+      "enabled": true,
+      "matcher": {"primitive": "minimum_should_match", "minimum": 3, "children": [
+        {"primitive": "token_any", "terms": ["privileged", "administrator"]},
+        {"primitive": "token_any", "terms": ["review", "reviewed", "recertification"]},
+        {"primitive": "token_any", "terms": ["periodic", "quarterly", "monthly", "annually"]}
+      ]},
+      "evidenceNeeds": [
+        {"id": "privileged-scope", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["privileged", "administrator"]}},
+        {"id": "review-action", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["review", "reviewed", "recertification"]}},
+        {"id": "review-cadence", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["periodic", "quarterly", "monthly", "annually"]}},
+        {"id": "mandatory-language", "required": true, "weight": 0.5, "purpose": "support", "matcher": {"primitive": "obligation_term", "terms": ["must", "shall", "required", "requires"]}},
+        {"id": "conflict-negation", "required": false, "weight": 1.0, "purpose": "conflict", "matcher": {"primitive": "proximity", "left": ["not", "never", "optional"], "right": ["review", "reviewed"], "maxTokens": 5}}
+      ],
+      "gatePolicy": {"id": "deterministic-support-standard", "version": "1.0.0"},
+      "output": {"kind": "risk", "statement": "Privileged access is periodically reviewed.", "severity": "Medium", "title": "Privileged-access review cadence requires evidence", "description": "The policy mandates periodic review of privileged access; completed review evidence should be retained.", "businessImpact": "Unverified access recertification can leave obsolete privileged access active.", "recommendedFix": "Retain the latest review record and assigned remediation owners.", "owner": "Security"},
+      "provenance": {"changelog": "Initial M5a control pattern.", "fixtures": ["privileged-access-periodic-review"]}
+    },
+    {
+      "id": "compliance.emergency-access-review-deadline",
+      "version": "1.0.0",
+      "title": "Emergency access is reviewed within a defined period",
+      "family": "assertion",
+      "claimType": "deadline_control",
+      "priorityHint": "High",
+      "enabled": true,
+      "matcher": {"primitive": "all_of", "children": [
+        {"primitive": "exact_phrase", "phrases": ["emergency access"]},
+        {"primitive": "duration_deadline", "maxHours": 168, "terms": ["review", "reviewed"]}
+      ]},
+      "evidenceNeeds": [
+        {"id": "emergency-access", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "exact_phrase", "phrases": ["emergency access"]}},
+        {"id": "review-deadline", "required": true, "weight": 1.5, "purpose": "support", "matcher": {"primitive": "duration_deadline", "maxHours": 168, "terms": ["review", "reviewed"]}},
+        {"id": "mandatory-language", "required": true, "weight": 0.5, "purpose": "support", "matcher": {"primitive": "obligation_term", "terms": ["must", "shall", "required"]}},
+        {"id": "conflict-negation", "required": false, "weight": 1.0, "purpose": "conflict", "matcher": {"primitive": "proximity", "left": ["not", "never"], "right": ["review", "reviewed"], "maxTokens": 5}}
+      ],
+      "gatePolicy": {"id": "deterministic-support-standard", "version": "1.0.0"},
+      "output": {"kind": "risk", "statement": "Emergency access is reviewed within the documented deadline.", "severity": "High", "title": "Emergency-access review deadline requires monitoring", "description": "Emergency access must be reviewed within the documented period.", "businessImpact": "Late review can allow exceptional access to remain unexamined.", "recommendedFix": "Monitor review completion against the cited deadline and retain the review record.", "owner": "Security Operations"},
+      "provenance": {"changelog": "Initial M5a deadline pattern.", "fixtures": ["emergency-access-review-deadline"]}
+    },
+    {
+      "id": "compliance.incident-notification-deadline",
+      "version": "1.0.0",
+      "title": "Security incidents have a notification deadline",
+      "family": "assertion",
+      "claimType": "deadline_control",
+      "priorityHint": "High",
+      "enabled": true,
+      "matcher": {"primitive": "all_of", "children": [
+        {"primitive": "token_any", "terms": ["incident", "breach"]},
+        {"primitive": "token_any", "terms": ["notify", "notification", "reported"]},
+        {"primitive": "duration_deadline", "maxHours": 720, "terms": ["notify", "notification", "reported"]}
+      ]},
+      "evidenceNeeds": [
+        {"id": "incident-scope", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["incident", "breach"]}},
+        {"id": "notification-action", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["notify", "notification", "reported"]}},
+        {"id": "notification-deadline", "required": true, "weight": 1.5, "purpose": "support", "matcher": {"primitive": "duration_deadline", "maxHours": 720, "terms": ["notify", "notification", "reported"]}},
+        {"id": "mandatory-language", "required": true, "weight": 0.5, "purpose": "support", "matcher": {"primitive": "obligation_term", "terms": ["must", "shall", "required"]}},
+        {"id": "conflict-negation", "required": false, "weight": 1.0, "purpose": "conflict", "matcher": {"primitive": "proximity", "left": ["not", "never"], "right": ["notify", "notification"], "maxTokens": 5}}
+      ],
+      "gatePolicy": {"id": "deterministic-support-standard", "version": "1.0.0"},
+      "output": {"kind": "risk", "statement": "Security incidents are notified within a defined deadline.", "severity": "High", "title": "Incident-notification deadline requires operational proof", "description": "The incident policy defines a notification deadline that must be operationally evidenced.", "businessImpact": "Missed notification deadlines can create contractual and regulatory exposure.", "recommendedFix": "Test the notification workflow and retain timestamped notification records.", "owner": "Incident Response"},
+      "provenance": {"changelog": "Initial M5a deadline pattern.", "fixtures": ["incident-notification-deadline"]}
+    },
+    {
+      "id": "compliance.critical-supplier-periodic-assessment",
+      "version": "1.0.0",
+      "title": "Critical suppliers receive periodic assessment",
+      "family": "assertion",
+      "claimType": "third_party_control",
+      "priorityHint": "Medium",
+      "enabled": true,
+      "matcher": {"primitive": "all_of", "children": [
+        {"primitive": "token_any", "terms": ["supplier", "vendor", "third-party"]},
+        {"primitive": "token_any", "terms": ["assessment", "assessed", "review", "reviewed"]},
+        {"primitive": "token_any", "terms": ["periodic", "annual", "annually", "quarterly"]}
+      ]},
+      "evidenceNeeds": [
+        {"id": "supplier-scope", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["supplier", "vendor", "third-party"]}},
+        {"id": "assessment-action", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["assessment", "assessed", "review", "reviewed"]}},
+        {"id": "assessment-cadence", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["periodic", "annual", "annually", "quarterly"]}},
+        {"id": "mandatory-language", "required": true, "weight": 0.5, "purpose": "support", "matcher": {"primitive": "obligation_term", "terms": ["must", "shall", "required"]}},
+        {"id": "conflict-negation", "required": false, "weight": 1.0, "purpose": "conflict", "matcher": {"primitive": "proximity", "left": ["not", "never", "optional"], "right": ["assessed", "assessment", "reviewed"], "maxTokens": 6}}
+      ],
+      "gatePolicy": {"id": "deterministic-support-standard", "version": "1.0.0"},
+      "output": {"kind": "risk", "statement": "Critical suppliers receive periodic assessment.", "severity": "Medium", "title": "Critical-supplier assessment cadence requires proof", "description": "Critical suppliers must receive periodic assessment under the cited policy.", "businessImpact": "Unverified supplier assessments can leave material third-party exposure unmanaged.", "recommendedFix": "Retain the latest assessment and remediation plan for each critical supplier.", "owner": "Vendor Management"},
+      "provenance": {"changelog": "Initial M5a third-party pattern.", "fixtures": ["critical-supplier-periodic-assessment"]}
+    },
+    {
+      "id": "compliance.backups-tested",
+      "version": "1.0.0",
+      "title": "Backups are tested",
+      "family": "assertion",
+      "claimType": "resilience_control",
+      "priorityHint": "Medium",
+      "enabled": true,
+      "matcher": {"primitive": "proximity", "left": ["backup", "backups", "restore"], "right": ["test", "tested", "exercise"], "maxTokens": 12},
+      "evidenceNeeds": [
+        {"id": "backup-scope", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["backup", "backups", "restore"]}},
+        {"id": "test-action", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["test", "tested", "exercise"]}},
+        {"id": "mandatory-language", "required": true, "weight": 0.5, "purpose": "support", "matcher": {"primitive": "obligation_term", "terms": ["must", "shall", "required"]}},
+        {"id": "conflict-negation", "required": false, "weight": 1.0, "purpose": "conflict", "matcher": {"primitive": "proximity", "left": ["not", "never"], "right": ["tested", "test"], "maxTokens": 5}}
+      ],
+      "gatePolicy": {"id": "deterministic-support-standard", "version": "1.0.0"},
+      "output": {"kind": "risk", "statement": "Backups are tested under a documented requirement.", "severity": "Medium", "title": "Backup testing requires retained evidence", "description": "The cited policy requires backup or restore testing.", "businessImpact": "Untested recovery procedures can fail during an outage.", "recommendedFix": "Retain recent restore-test results and remediation records.", "owner": "Infrastructure"},
+      "provenance": {"changelog": "Initial M5a resilience pattern.", "fixtures": ["backups-tested"]}
+    },
+    {
+      "id": "compliance.policy-ownership-assigned",
+      "version": "1.0.0",
+      "title": "Policy ownership is assigned",
+      "family": "assertion",
+      "claimType": "governance_control",
+      "priorityHint": "Low",
+      "enabled": true,
+      "matcher": {"primitive": "all_of", "children": [
+        {"primitive": "token_any", "terms": ["policy", "standard", "procedure"]},
+        {"primitive": "token_any", "terms": ["owner", "ownership", "accountable"]},
+        {"primitive": "token_any", "terms": ["assigned", "designated", "responsible"]}
+      ]},
+      "evidenceNeeds": [
+        {"id": "policy-scope", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["policy", "standard", "procedure"]}},
+        {"id": "owner-role", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["owner", "ownership", "accountable"]}},
+        {"id": "assignment-action", "required": true, "weight": 1.0, "purpose": "support", "matcher": {"primitive": "token_any", "terms": ["assigned", "designated", "responsible"]}},
+        {"id": "mandatory-language", "required": true, "weight": 0.5, "purpose": "support", "matcher": {"primitive": "obligation_term", "terms": ["must", "shall", "required"]}},
+        {"id": "conflict-negation", "required": false, "weight": 1.0, "purpose": "conflict", "matcher": {"primitive": "proximity", "left": ["not", "unassigned", "without"], "right": ["owner", "ownership"], "maxTokens": 5}}
+      ],
+      "gatePolicy": {"id": "deterministic-support-standard", "version": "1.0.0"},
+      "output": {"kind": "risk", "statement": "Policy ownership is explicitly assigned.", "severity": "Low", "title": "Policy ownership requires current accountability evidence", "description": "The cited governance text assigns ownership for the policy or procedure.", "businessImpact": "Stale or unclear ownership can delay review and remediation.", "recommendedFix": "Confirm the named role remains accountable and record the next review date.", "owner": "Governance"},
+      "provenance": {"changelog": "Initial M5a governance pattern.", "fixtures": ["policy-ownership-assigned"]}
+    }
+  ]
+}

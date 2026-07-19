@@ -1384,3 +1384,40 @@ calculation and consider immutable-key memoization or batched eligibility
 evaluation. F7 remains unchanged because no response-derived state correction
 was needed; F8 downgrade behavior remains unchanged. No cache or eligibility
 redesign is part of this hardening pass.
+
+## 2026-07-18 — M5a claim acceptance is declarative, deterministic and audit-only outside the report projection
+
+**Decision.** The M4 frozen tenant snapshot and report-local evidence registry are
+the sole evidence boundary for M5a. Versioned JSON claim patterns owned by the
+domain module emit proposals; `typed-matchers-v1` records bounded deterministic
+observations; `deterministic-support-gate-v1` alone returns accepted, rejected or
+insufficient evidence. LLM output can name an allowed spec, wording and frozen
+citations, but those citations are hints only: every LLM proposal is re-matched
+against the complete frozen evidence set, including conflicts, and re-gated.
+Accepted bindings are the intersection of proposed hints and successful support-
+matcher attribution; unrelated citations cannot affect score or provenance.
+Unknown evidence fails closed. One projection from accepted decisions exclusively
+owns workflows, risks, recommendations, summary and top finding; all other
+decisions remain in a separate report-local audit graph so the 20-key
+`EvidentiaReport` stays unchanged. Full-mode analytical mutation is atomic and
+restores the complete deterministic baseline on any exception.
+
+Claim patterns are released independently under
+`modules/compliance/claim-patterns/<version>` and are immutable under
+`(claim-pack id, claim spec, pattern version)`. The released M3
+`modules/compliance/1.0.0` directory and its 17 goldens are unchanged. Threshold,
+matcher and gate versions are report provenance. Nested `evidence_count` and the
+unwired `comparison` primitive are rejected by the v1 schema; matcher execution
+has explicit depth, node, evidence and primitive-evaluation budgets. Tenant-
+scoped metrics are atomic, non-authoritative counters and feedback has explicit
+replacement semantics; neither may tune behavior automatically. Migration
+`f5a6c7d8e9b0` adds composite tenant-safe claim/evidence/feedback constraints,
+including report-local corrected-citation binding integrity, and
+downgrades to exact M4 without fabricating old-report decisions. The rollout flag
+defaults off; claim-enabled failure never falls back to an unvalidated path.
+
+**Deferred.** The repository has a pre-existing M3 golden harness drift in which
+fresh computation changes only `manifestSha256`; M5a neither changes the committed
+goldens nor claims to fix that separate infrastructure issue. Production-scale
+M5b pattern authorship/calibration, automatic or
+cross-tenant learning, embeddings/FTS, external packs and the full CAD runtime.

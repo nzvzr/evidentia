@@ -19,6 +19,7 @@ from app.api.deps import CompanyContext, get_company_context, require_admin
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.repositories import reports as reports_repo
+from app.repositories import claims as claims_repo
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -67,6 +68,19 @@ def get_report_sources(
     if not get_settings().is_db_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
     data = reports_repo.get_report_sources(db, report_id, ctx.company_id)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return data
+
+
+@router.get("/{report_id}/claims")
+def get_report_claims(
+    report_id: str,
+    ctx: CompanyContext = Depends(get_company_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Tenant-scoped M5a audit projection; never part of EvidentiaReport JSON."""
+    data = claims_repo.get_report_claims(db, report_id, ctx.company_id)
     if data is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
     return data

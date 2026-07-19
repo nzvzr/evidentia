@@ -337,3 +337,29 @@ export interface ReportSourceAudit {
   }>;
   evidenceBindings: ReportEvidenceSource[];
 }
+
+/** Tenant-private feedback projection. Kept outside EvidentiaReport. */
+export type ReportFeedbackVerdict = "correct_useful" | "partially_correct" | "incorrect";
+export type ItemFeedbackVerdict = "accepted" | "rejected" | "edited" | "insufficient_evidence";
+export type CitationFeedbackVerdict = "correct" | "irrelevant" | "incorrect_source";
+
+export interface ReportFeedbackSnapshot {
+  report: null | {
+    verdict: ReportFeedbackVerdict;
+    reasonCode?: string | null;
+    privateText?: string | null;
+  };
+  items: Array<{
+    itemPath: string;
+    itemType: "workflow_step" | "risk" | "citation" | "suggested_action";
+    verdict: ItemFeedbackVerdict;
+    reasonCode?: string | null;
+    editedText?: string | null;
+  }>;
+  citations: Array<{
+    itemPath: string;
+    citationId: string;
+    verdict: CitationFeedbackVerdict;
+    correctedAnchorId?: string | null;
+  }>;
+}

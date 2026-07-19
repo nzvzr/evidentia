@@ -1,0 +1,76 @@
+{
+  "fixturePackVersion": "claim-fixtures-v1",
+  "scope": "Small M5a regression pack only; not comprehensive compliance coverage.",
+  "patterns": [
+    {
+      "claimSpecId": "compliance.administrative-access-mfa",
+      "cases": [
+        {"id": "positive", "kind": "positive", "text": "Administrative access must use multi-factor authentication (MFA).", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true},
+        {"id": "negative", "kind": "negative", "text": "Employees may use the customer portal with a password.", "expectedDecision": "insufficient_evidence", "expectedReason": "NO_VALID_EVIDENCE", "expectedBinding": false},
+        {"id": "negated", "kind": "negated", "text": "Administrative access is not required to use MFA.", "expectedDecision": "rejected", "expectedReason": "CONTRADICTING_EVIDENCE", "expectedBinding": false},
+        {"id": "ambiguous", "kind": "insufficient", "text": "MFA is available for administrative access.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "unicode-boundary", "kind": "boundary", "text": "Ａｄｍｉｎｉｓｔｒａｔｉｖｅ access shall require MFA.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true}
+      ]
+    },
+    {
+      "claimSpecId": "compliance.privileged-access-periodic-review",
+      "cases": [
+        {"id": "positive", "kind": "positive", "text": "Privileged access must be reviewed quarterly.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true},
+        {"id": "negative", "kind": "negative", "text": "Application users review their own profile details.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "negated", "kind": "negated", "text": "Privileged access is never reviewed; a quarterly review is not required.", "expectedDecision": "rejected", "expectedReason": "CONTRADICTING_EVIDENCE", "expectedBinding": false},
+        {"id": "ambiguous", "kind": "insufficient", "text": "Privileged accounts may be reviewed when requested.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "annual-boundary", "kind": "boundary", "text": "Administrator access shall be reviewed annually.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true}
+      ]
+    },
+    {
+      "claimSpecId": "compliance.emergency-access-review-deadline",
+      "cases": [
+        {"id": "positive", "kind": "positive", "text": "Emergency access must be reviewed within 24 hours.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true},
+        {"id": "negative", "kind": "negative", "text": "Emergency contacts are listed in the runbook.", "expectedDecision": "insufficient_evidence", "expectedReason": "NO_VALID_EVIDENCE", "expectedBinding": false},
+        {"id": "negated", "kind": "negated", "text": "Emergency access must not be reviewed within 24 hours.", "expectedDecision": "rejected", "expectedReason": "CONTRADICTING_EVIDENCE", "expectedBinding": false},
+        {"id": "ambiguous", "kind": "insufficient", "text": "Emergency access should be reviewed promptly.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "deadline-boundary", "kind": "boundary", "text": "Emergency access shall be reviewed within 7 days.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true}
+      ]
+    },
+    {
+      "claimSpecId": "compliance.incident-notification-deadline",
+      "cases": [
+        {"id": "positive", "kind": "positive", "text": "A security incident must be reported by notification within 72 hours.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true},
+        {"id": "negative", "kind": "negative", "text": "The incident commander maintains the bridge.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "negated", "kind": "negated", "text": "A security incident must not trigger notification within 72 hours.", "expectedDecision": "rejected", "expectedReason": "CONTRADICTING_EVIDENCE", "expectedBinding": false},
+        {"id": "ambiguous", "kind": "insufficient", "text": "Security incident notification occurs promptly.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "deadline-boundary", "kind": "boundary", "text": "A breach shall be reported by notification within 30 days.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true}
+      ]
+    },
+    {
+      "claimSpecId": "compliance.critical-supplier-periodic-assessment",
+      "cases": [
+        {"id": "positive", "kind": "positive", "text": "Each critical supplier must receive an annual assessment.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true},
+        {"id": "negative", "kind": "negative", "text": "Supplier contact details are stored in procurement.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "negated", "kind": "negated", "text": "A critical supplier is never assessed; annual review is optional.", "expectedDecision": "rejected", "expectedReason": "CONTRADICTING_EVIDENCE", "expectedBinding": false},
+        {"id": "ambiguous", "kind": "insufficient", "text": "Critical vendors may receive an assessment when needed.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "cadence-boundary", "kind": "boundary", "text": "A critical vendor shall be reviewed annually.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true}
+      ]
+    },
+    {
+      "claimSpecId": "compliance.backups-tested",
+      "cases": [
+        {"id": "positive", "kind": "positive", "text": "Backups must be tested through a restore exercise.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true},
+        {"id": "negative", "kind": "negative", "text": "Backups are copied to a second region.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "negated", "kind": "negated", "text": "Backups must not be tested during a restore exercise.", "expectedDecision": "rejected", "expectedReason": "CONTRADICTING_EVIDENCE", "expectedBinding": false},
+        {"id": "ambiguous", "kind": "insufficient", "text": "A backup restore test is available.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "proximity-boundary", "kind": "boundary", "text": "The backup procedure shall require teams to execute and document a complete restore test.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true}
+      ]
+    },
+    {
+      "claimSpecId": "compliance.policy-ownership-assigned",
+      "cases": [
+        {"id": "positive", "kind": "positive", "text": "The policy owner must be assigned and accountable for review.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true},
+        {"id": "negative", "kind": "negative", "text": "The policy was published after approval.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "negated", "kind": "negated", "text": "The policy must not be assigned an owner.", "expectedDecision": "rejected", "expectedReason": "CONTRADICTING_EVIDENCE", "expectedBinding": false},
+        {"id": "ambiguous", "kind": "insufficient", "text": "Policy ownership may be discussed during review.", "expectedDecision": "insufficient_evidence", "expectedReason": "MISSING_REQUIRED_MATCHER", "expectedBinding": false},
+        {"id": "role-boundary", "kind": "boundary", "text": "This procedure shall designate an accountable owner responsible for maintenance.", "expectedDecision": "accepted", "expectedReason": "SUPPORT_THRESHOLD_MET", "expectedBinding": true}
+      ]
+    }
+  ]
+}

@@ -90,6 +90,22 @@ per-document/excerpt limits remain explicit. The `tcs1` digest binds company
 scope, sorted version ids, manifests, retrieval version and configuration. No
 transaction is held over an LLM call.
 
+M5a adds a second independent default-off rollout gate,
+`EVIDENTIA_CLAIM_ENGINE_ENABLED`. For tenant providers only, the existing frozen
+snapshot and report-local M4 bindings feed versioned declarative claim patterns,
+`typed-matchers-v1`, and `deterministic-support-gate-v1`. The gate alone decides
+accepted/rejected/insufficient. Every candidate is matched against the complete
+bounded frozen evidence set; LLM citation ids are hints only and cannot hide
+conflicts or create support. Accepted bindings come only from successful support-
+matcher observations. One accepted-only projection owns workflow, risks, actions,
+summary and top finding; zero accepted claims produce empty analytical arrays and
+an honest no-accepted-claim narrative. Rejected and insufficient decisions remain
+audit provenance. LLM full mode may propose wording plus frozen citation ids but
+cannot provide acceptance, bypass projection or survive a failed atomic full-mode
+refinement. Claim-engine errors fail the
+generation rather than silently returning to the M4 risk path. Flag off preserves
+M4 behavior and demo generation does not run tenant claims.
+
 Deterministic agents run in order, then optional LLM refinement, then repair and
 assembly:
 
@@ -156,6 +172,20 @@ Document deletion is soft deletion. New provider snapshots exclude deleted
 documents, while immutable versions/sections and completed report bindings remain
 auditable. Full document text is not copied into report bindings.
 
+M5a stores claim packs separately at
+`modules/<module>/claim-patterns/<version>/`; adding a claim pack does not alter
+the released M3 classification-module directory, digest or finalization identity.
+Migration `f5a6c7d8e9b0` adds immutable global pattern identities; normalized
+report-local candidates, deterministic decisions and binding links; tenant- and
+pattern-version-scoped non-authoritative counters; and tenant feedback/retrieval-
+miss records. Composite report/company and claim/binding/company foreign keys
+reject cross-tenant references at SQL level. Claims are exposed separately at
+`GET /api/reports/{id}/claims`; feedback uses authenticated replacement-semantics
+endpoints below the same report resource. Neither changes `EvidentiaReport`.
+Corrected citation feedback resolves a submitted anchor to a report-local evidence
+binding; a composite report/company foreign key enforces frozen-snapshot
+membership even for direct SQL writes.
+
 - **Production requires managed PostgreSQL.** `DATABASE_URL=postgresql://…`
 - **SQLite (empty `DATABASE_URL`) is local development only.** Container
   filesystems are typically ephemeral, so a redeploy destroys every user and
@@ -193,7 +223,8 @@ lock) — sufficient, but a different mechanism, and dev-only.
 `EVIDENTIA_DB_ENABLED`, `JWT_SECRET`, `EVIDENTIA_BFF_SECRET`,
 `EVIDENTIA_EMAIL_BACKEND` (+ SMTP settings), `EVIDENTIA_CORS_ORIGINS`,
 `EVIDENTIA_TRUSTED_PROXY_COUNT`, `EVIDENTIA_TENANT_CORPUS_ENABLED`,
-`EVIDENTIA_TENANT_GENERATION_ENABLED`, and bounded tenant retrieval settings.
+`EVIDENTIA_TENANT_GENERATION_ENABLED`, `EVIDENTIA_CLAIM_ENGINE_ENABLED`, and
+bounded tenant retrieval/feedback settings.
 Frontend uses `EVIDENTIA_BACKEND_URL` (server-only).
 
 Production refuses to start on: a missing or non-generated `JWT_SECRET`, a

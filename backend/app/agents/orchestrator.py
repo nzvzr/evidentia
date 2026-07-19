@@ -20,6 +20,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import get_settings
+from app.claims.engine import (
+    AcceptedClaimProjection,
+    ClaimRunResult,
+    project_accepted_claims,
+    run_claim_engine,
+)
 from app.eval.metrics import narrative_score
 from app.services.llm import LLMCallResult, generate_structured_object
 from app.tools.document_search import rank_sections_for_persona, summarize_sections
@@ -37,7 +43,7 @@ from .structural_gate import (
 )
 from .narrative_gate import gate_fields
 from .structural_gate import default_structural_telemetry, reconcile_and_gate
-from .section_provider import DemoCorpusProvider, SectionProvider
+from .section_provider import DemoCorpusProvider, SectionProvider, TenantCorpusProvider
 from .metrics_agent import metrics_agent
 from .persona_mapper import persona_mapper, resolve_persona_key
 from .report_composer import build_agent_steps, report_composer, suggested_actions_for
@@ -355,6 +361,60 @@ def _llm_risks(
     return result, cleaned
 
 
+def _llm_claim_proposals(
+    market: str,
+    persona_brief: Dict[str, Any],
+    sections: List[Dict[str, Any]],
+    claim_run: ClaimRunResult,
+    max_output_tokens: int,
+) -> Tuple[LLMCallResult, List[Dict[str, Any]]]:
+    """Let the model propose wording and binding references only.
+
+    This helper deliberately does not validate or repair citation ids and does
+    not expose an acceptance field. The deterministic claim gate receives the
+    raw bounded proposals and is the only component that can accept them.
+    """
+    settings = get_settings()
+    ranked = rank_sections_for_persona(sections, persona_brief, market)
+    context = summarize_sections(ranked, max_chars=settings.evidentia_max_context_chars)
+    specs = [
+        {"claimSpecId": spec.id, "title": spec.title, "claimType": spec.claim_type}
+        for spec in claim_run.release.specs if spec.enabled
+    ]
+    result = generate_structured_object(
+        system=ANALYST_SYSTEM,
+        user=(
+            f"Market: {market}\nPersona: {persona_brief['title']}\n\n"
+            f"Allowed claim specifications: {specs}\n\n"
+            f"Frozen source sections:\n{_untrusted_evidence(context)}\n\n"
+            "Propose at most five concise claim statements. Each proposal must name one allowed "
+            "claimSpecId and copy one or more evidenceCodes from the frozen sections. Do not decide "
+            "whether a proposal is accepted; the deterministic gate decides that."
+        ),
+        schema_name="ClaimProposals",
+        schema={"proposals": [{
+            "claimSpecId": "string", "statement": "string", "evidenceCodes": ["string"]
+        }]},
+        fallback={},
+        max_output_tokens=max_output_tokens,
+    )
+    data = result.value if isinstance(result.value, dict) else {}
+    raw = data.get("proposals")
+    proposals: List[Dict[str, Any]] = []
+    if isinstance(raw, list):
+        for item in raw[:5]:
+            if not isinstance(item, dict):
+                continue
+            proposals.append({
+                "claimSpecId": item.get("claimSpecId"),
+                "statement": item.get("statement"),
+                "evidenceCodes": item.get("evidenceCodes"),
+                "model": settings.evidentia_llm_model,
+                "promptVersion": PROMPT_VERSION,
+            })
+    return result, proposals
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
@@ -417,16 +477,57 @@ def run_pipeline_ex(
 
     provider = section_provider or DemoCorpusProvider()
     documents, sections = provider.load(selected_document_ids)
+    claim_engine_enabled = bool(
+        settings.evidentia_claim_engine_enabled and isinstance(provider, TenantCorpusProvider)
+    )
+    # A claim-enabled run bypasses the report cache: every persisted report owns
+    # an independent candidate/decision graph and pattern metrics update.
+    if claim_engine_enabled:
+        cache_enabled = False
     doc_ids = [d["id"] for d in documents]
     persona_key = resolve_persona_key(persona, custom_persona)
     report_id = _derive_id(market, persona, custom_persona, doc_ids)
 
     # --- deterministic baseline (always) ---
     persona_brief = persona_mapper(market, persona, custom_persona, sections)
-    workflow_steps, wf_gen = workflow_builder(persona_key, market, sections)
-    risks, risk_gen = risk_analyzer(
-        persona_key, market, sections, min_support=settings.evidentia_min_evidence_support
-    )
+    claim_run: ClaimRunResult | None = None
+    claim_projection: AcceptedClaimProjection | None = None
+    included_claim_candidates: set[str] = set()
+    if claim_engine_enabled:
+        claim_run = run_claim_engine(provider)
+        claim_projection = project_accepted_claims(
+            claim_run,
+            persona_title=persona_brief["title"],
+            market=market,
+            document_count=len(documents),
+        )
+        workflow_steps = claim_projection.workflow_steps
+        risks = claim_projection.risks
+        included_claim_candidates = set(claim_projection.included_candidate_ids)
+        accepted_scores = [item.decision.support_score for item in claim_run.accepted]
+        wf_gen = {
+            "generatedBeforeFiltering": len(claim_run.candidates),
+            "groundedKept": len(workflow_steps),
+            "unsupportedDropped": sum(decision.decision != "accepted" for decision in claim_run.decisions),
+            "insufficientEmitted": 0,
+            "sourceDocumentMismatch": 0,
+            "audit": claim_run.telemetry()["decisions"],
+        }
+        risk_gen = {
+            "generatedBeforeFiltering": len(claim_run.candidates),
+            "groundedKept": len(risks),
+            "unsupportedDropped": sum(decision.decision != "accepted" for decision in claim_run.decisions),
+            "insufficientEmitted": 0,
+            "sourceDocumentMismatch": 0,
+            "supportScores": accepted_scores,
+            "provenance": [],
+            "audit": claim_run.telemetry()["decisions"],
+        }
+    else:
+        workflow_steps, wf_gen = workflow_builder(persona_key, market, sections)
+        risks, risk_gen = risk_analyzer(
+            persona_key, market, sections, min_support=settings.evidentia_min_evidence_support
+        )
     citations = citation_binder(sections, workflow_steps, risks)
     base_metrics = metrics_agent(
         documents, sections, citations, risks, workflow_steps, market, persona_key, persona_brief["title"]
@@ -512,12 +613,16 @@ def run_pipeline_ex(
     structural_info = default_structural_telemetry()
 
     if resolved == "full":
+        det_persona = copy.deepcopy(persona_brief)
+        det_workflow = copy.deepcopy(workflow_steps)
+        det_risks = copy.deepcopy(risks)
+        det_claim_run = claim_run
+        det_claim_projection = claim_projection
+        det_included_claim_candidates = set(included_claim_candidates)
         try:
             # Preserve the complete deterministic analytical baseline; build the
             # LLM output as a *separate* candidate and never mutate the baseline
             # until the structural gate accepts it.
-            det_persona, det_workflow, det_risks = persona_brief, workflow_steps, risks
-
             r1, cand_persona, cand_workflow = _llm_persona_workflow(
                 market, persona, custom_persona, sections, det_persona, det_workflow,
                 settings.evidentia_max_output_tokens,
@@ -527,9 +632,25 @@ def run_pipeline_ex(
             input_tokens += r1.input_tokens
             output_tokens += r1.output_tokens
 
-            r2, cand_risks = _llm_risks(
-                market, cand_persona, sections, det_risks, settings.evidentia_max_output_tokens
-            )
+            if claim_run is not None and isinstance(provider, TenantCorpusProvider):
+                r2, proposals = _llm_claim_proposals(
+                    market, cand_persona, sections, claim_run, settings.evidentia_max_output_tokens
+                )
+                candidate_claim_run = run_claim_engine(
+                    provider, llm_proposals=proposals, release=claim_run.release
+                )
+                candidate_projection = project_accepted_claims(
+                    candidate_claim_run,
+                    persona_title=cand_persona["title"],
+                    market=market,
+                    document_count=len(documents),
+                )
+                cand_workflow = candidate_projection.workflow_steps
+                cand_risks = candidate_projection.risks
+            else:
+                r2, cand_risks = _llm_risks(
+                    market, cand_persona, sections, det_risks, settings.evidentia_max_output_tokens
+                )
             llm_calls += 1 if r2.called else 0
             context_chars += r2.input_chars
             input_tokens += r2.input_tokens
@@ -559,11 +680,42 @@ def run_pipeline_ex(
             workflow_steps = gated["workflowSteps"]
             risks = gated["risks"]
             structural_info = gated["telemetry"]
+            if claim_engine_enabled:
+                # Claim-mode analytical projection is atomic. If the existing
+                # field gate would mix deterministic and candidate analytical
+                # fields, retain the complete deterministic projection.
+                if (
+                    persona_brief == cand_persona
+                    and workflow_steps == candidate_projection.workflow_steps
+                    and risks == candidate_projection.risks
+                ):
+                    claim_run = candidate_claim_run
+                    claim_projection = candidate_projection
+                    included_claim_candidates = set(candidate_projection.included_candidate_ids)
+                else:
+                    persona_brief = det_persona
+                    workflow_steps = det_workflow
+                    risks = det_risks
+                    # Preserve successfully evaluated proposals as audit-only;
+                    # only their analytical projection falls back here. An
+                    # exception uses the separate rollback path below and
+                    # restores the deterministic claim run itself.
+                    claim_run = candidate_claim_run
+                    claim_projection = det_claim_projection
+                    included_claim_candidates = det_included_claim_candidates
+                    structural_info["fullModeAnalyticalFallback"] = True
             citations = citation_binder(sections, workflow_steps, risks)  # re-bind accepted evidence
         except Exception:  # noqa: BLE001
             resolved = "off"  # unexpected failure → deterministic
+            llm_fallback = True
             structural_info = default_structural_telemetry()
             structural_info["fullModeAnalyticalFallback"] = True
+            persona_brief = det_persona
+            workflow_steps = det_workflow
+            risks = det_risks
+            claim_run = det_claim_run
+            claim_projection = det_claim_projection
+            included_claim_candidates = det_included_claim_candidates
 
     # --- deterministic grounding repair (both paths, before assembly) ---
     repair_info = repair_grounding(
@@ -582,6 +734,10 @@ def run_pipeline_ex(
         workflow_steps=workflow_steps, risks=risks, citations=citations, metrics=metrics,
         agent_steps=agent_steps, generated_at=generated_at,
     )
+    if claim_projection is not None:
+        report["summary"] = claim_projection.summary
+        report["topFinding"] = claim_projection.top_finding
+        report["suggestedActions"] = copy.deepcopy(claim_projection.suggested_actions)
 
     # --- narrative polish + field-level quality gate (summary + full) ---
     gate_info: Dict[str, Any] = {
@@ -589,7 +745,7 @@ def run_pipeline_ex(
         "deterministicNarrativeScore": 0.0, "candidateNarrativeScore": 0.0,
         "finalNarrativeScore": 0.0, "narrativeGateDecision": "no-updates",
     }
-    if resolved in ("summary", "full"):
+    if resolved in ("summary", "full") and not claim_engine_enabled:
         try:
             max_tokens = 500 if resolved == "summary" else settings.evidentia_max_output_tokens
             r_polish, updates = _llm_report_polish(report, sections, max_tokens)
@@ -611,7 +767,8 @@ def run_pipeline_ex(
 
     # --- generation metadata ---
     if resolved == "off":
-        report["suggestedActions"] = suggested_actions_for(persona_key)
+        if not claim_engine_enabled:
+            report["suggestedActions"] = suggested_actions_for(persona_key)
         report["generationMode"] = "deterministic"
         report["llmProvider"] = "none"
         report["llmModel"] = None
@@ -622,6 +779,14 @@ def run_pipeline_ex(
 
     if company_name:
         report["company"] = company_name
+
+    if claim_run is not None:
+        included_claim_candidates = (
+            set(claim_projection.included_candidate_ids) if claim_projection is not None else set()
+        )
+        for item in claim_run.evaluated:
+            if item.spec is not None and item.candidate.candidate_id in included_claim_candidates:
+                claim_run.metrics[item.spec.id]["finalReportInclusionCount"] += 1
 
     logger.info(
         "[Evidentia LLM] intensity=%s->%s calls=%d model=%s contextChars=%d mode=%s",
@@ -657,6 +822,12 @@ def run_pipeline_ex(
         structural=structural_info, routing=routing,
         det_structural=det_struct_score, det_narrative=det_narr_score,
     )
+    if claim_run is not None:
+        telemetry["claimEngine"] = claim_run.telemetry()
+        telemetry["_claimRunResult"] = claim_run
+        telemetry["_includedClaimCandidateIds"] = sorted(included_claim_candidates)
+    else:
+        telemetry["claimEngine"] = {"enabled": False}
     return report, telemetry
 
 

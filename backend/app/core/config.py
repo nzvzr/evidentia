@@ -340,6 +340,9 @@ class Settings(BaseSettings):
     # operator may ingest/finalize documents before allowing those documents to
     # drive authenticated reports. Disabled never means "use the demo corpus".
     evidentia_tenant_generation_enabled: bool = False
+    # M5a rollout gate. Off preserves the committed M4 generation path. When
+    # on, tenant risk findings come only from deterministic claim decisions.
+    evidentia_claim_engine_enabled: bool = False
     # Deterministic Stage-1 retrieval bounds (tenant-lexical-v1). These limits
     # are part of the snapshot identity and therefore audit-visible.
     evidentia_tenant_retrieval_max_documents: int = 50
@@ -468,6 +471,15 @@ class Settings(BaseSettings):
     rl_generate_tenant_window: int = 3600
     rl_generate_ip_limit: int = 20
     rl_generate_ip_window: int = 3600
+
+    # Feedback is write-heavy but never spends model budget. Bound it
+    # separately so feedback cannot consume generation allowance.
+    rl_feedback_user_limit: int = 120
+    rl_feedback_user_window: int = 3600
+    rl_feedback_tenant_limit: int = 500
+    rl_feedback_tenant_window: int = 3600
+    rl_feedback_ip_limit: int = 200
+    rl_feedback_ip_window: int = 3600
 
     # --- request limits ---
     # Hard cap on request body bytes, enforced before parsing (see main.py).
