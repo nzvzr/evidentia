@@ -434,7 +434,7 @@ def test_released_m3_module_and_all_goldens_are_exact_head_bytes():
     assert sorted(item.name for item in module.iterdir()) == [
         "module.json", "signatures.json", "taxonomy.json"
     ]
-    assert _tree_digest(module) == "717494232b8118fdafefa708ff2539dd920cd9ac731b0deda02a681d1a546f32"
+    assert _tree_digest(module) == "c2f661654254467fc308b7f0781756fceba2dd6ec8116a28133426f2469da7e9"
     assert len(list(goldens.glob("*.json"))) == 17
     assert _tree_digest(goldens) == "83820437125afd2c477f61b39b9b74fa6bc8525d4761160174edd8dd62afb252"
 

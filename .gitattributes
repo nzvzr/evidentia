@@ -1,0 +1,4 @@
+backend/app/modules/**/*.json text eol=lf
+backend/tests/golden/**/*.json text eol=lf
+backend/tests/golden/**/*.md text eol=lf
+backend/tests/golden/**/*.txt text eol=lf
