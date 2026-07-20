@@ -4,53 +4,58 @@ _Last updated: 2026-07-20. Keep under 100 lines._
 
 ## Current branch and worktree
 
-`main` integrates M4 + M5a (deterministic claim engine) + DOCX Renderer R1. Both
-`main` and `origin/main` point to `7c8fe47`. The current tenant-only frontend
-conversion is intentionally uncommitted for review. No branch, commit, push or PR
-was created for this conversion.
+`main` integrates M4 + M5a (deterministic claim engine) + DOCX Renderer R1 and
+the tenant-only frontend. `main` and `origin/main` point to `e80e6ba`. The
+zero-accepted-claims presentation fix is intentionally uncommitted for review.
+No branch, commit, push or PR was created.
 
 The temporary `tmp/m5a` and `tmp/docx-renderer` branches/worktrees still exist for
 rollback/reference; do not remove them before the eventual push.
 
-## Tenant-only frontend conversion
+## Zero-accepted-claims presentation
 
-- Documents renders only company-owned rows from `/api/documents`; bundled rows
-  without `companyId` are discarded. Counts cover real documents,
-  generation-eligible current versions, active processing and real section totals.
-- Corpus-off/backend-down states are explicit. The legacy JSON/local upload path,
-  session upload UI, sample corpus, fake statistics and detail drawer are removed.
-- Workspace lists only current versions with `stage=ready`, `finalized=true` and
-  `generationEligible=true`. It sends real document ids to the authenticated
-  `/api/generate-workflow` path and disables Run when no eligible selection exists.
-- Workspace/pending keys are now `evidentia:tenant-workspace:v2` and
-  `evidentia:tenant-pending-run:v2`. Old bundled selections and public-demo keys
-  are ignored/removed.
-- Running uses honest indeterminate progress and a slow-request notice; there is
-  no fictional per-agent/stage completion. Success navigates on the persisted id.
-- Reports, playbooks and sidebar recents load persisted tenant reports or render
-  honest empty states. Landing-page document examples no longer mimic activity or
-  claim unsupported formats.
-- Removed anonymous/local runtime generation: the `/api/demo/generate-workflow`
-  route, bundled corpus/report/scenario data, TypeScript agents/tools/LLM provider,
-  browser report store and the orphaned anonymous rate limiter. Removed the unused
-  frontend `openai` package dependency.
+- `lib/reportPresentation.ts` owns the exact state: persisted M5a audit available
+  and enabled, accepted decision count zero, workflow empty, risks empty, actions
+  empty. Narrative text is never parsed.
+- Report detail fetches the tenant-scoped claim audit through a new BFF route,
+  collapses to one full-width column, and shows honest status/facts/configured
+  persona context while retaining source audit and private feedback. The BFF
+  persists refreshed session cookies on both successful and non-OK responses.
+- Citation cards use frozen report-local binding title/version/path/excerpt,
+  expand beyond a bounded preview, and form two columns only where width permits.
+  Report-local excerpt fallback is limited to an explicit demo corpus; tenant,
+  unavailable and unknown corpus modes never use it.
+- Static seven-agent timing, the `sections × 41` passage count and formula-derived
+  relevance/completeness/coverage charts are not presented as telemetry.
+- Zero-claim print/PDF is two compact sections: identity/status/facts/context and
+  frozen source appendix/audit. Empty analytical pages and invented checklist,
+  owner/date and generic follow-up actions are absent.
+- DOCX retains pure persisted-snapshot rendering and frozen evidence; it only adds
+  empty-section/positive-score guards and an honest configured-context label.
+- Mobile report detail hides the persistent sidebar below 760px so content and
+  citation cards use the full viewport.
 
-## Frontend verification
+## Verification
 
-- `npx vitest run`: **55 passed** (7 files).
+- `npx vitest run`: **80 passed** (11 files), including the claims BFF session,
+  status/no-fallback matrix and legacy/citation render cases.
 - `npx tsc --noEmit`: **passed**.
 - `npm run lint`: **0 errors, 6 existing React hook warnings**.
-- `npm run build`: **passed**; route manifest has no `/api/demo/*` endpoint.
+- `npm run build`: **passed**; route manifest includes tenant-scoped `/claims`.
+- Focused DOCX renderer: **32 passed**.
+- Authenticated persisted-report smoke: passed at 1440/1366/820/390px; no
+  horizontal overflow, positive score, empty analytical content or timeline.
+  Print has 2 sections; PDF emitted; DOCX returned 200 with the expected MIME.
 
 ## Backend integrity
 
-No backend code, migration, database model, immutable M3/M4/M5a module data,
-claim-engine behavior, DOCX renderer or golden fixture was modified. The earlier
-integrated backend verification remains recorded in `PROJECT_STATE.md`.
+No migration, database model, immutable M3/M4/M5a module data, claim generation,
+gate threshold, persistence, retrieval, feedback semantics or golden fixture was
+modified. Backend changes are confined to DOCX presentation guards.
 
 ## Pending final integration work
 
-1. Review the uncommitted tenant-only frontend diff.
+1. Review the uncommitted zero-claim presentation diff.
 2. Full SQLite backend suite on merged `main`.
 3. Full PostgreSQL 16 backend suite on merged `main`.
 4. Confirm final migration graph / `alembic check` drift if not re-run.

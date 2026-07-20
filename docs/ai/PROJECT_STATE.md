@@ -1,21 +1,41 @@
 # Evidentia — Project State
 
 _Concise snapshot. Last updated: 2026-07-20. `main` integrates M4 + M5a + DOCX
-Renderer R1. The worktree also contains an uncommitted tenant-only frontend
-conversion for review. `main` and `origin/main` both point to `7c8fe47`._
+Renderer R1 and the tenant-only frontend. The worktree contains an uncommitted
+zero-accepted-claims presentation fix. `main` and `origin/main` point to
+`e80e6ba`._
 
 ## Current milestone
 
-`main` integrates M4 + M5a (deterministic claim engine) + DOCX Renderer R1. Both
-tracks were developed in parallel worktrees and are now merged into `main`. The
+`main` integrates M4 + M5a (deterministic claim engine) + DOCX Renderer R1 and
+the tenant-only frontend runtime. The
 M5a claim engine sits behind the default-off `EVIDENTIA_CLAIM_ENGINE_ENABLED`
 rollout flag (flag off remains the exact M4 path),
 and the DOCX renderer is a pure transformation of persisted report snapshots. The
 public `EvidentiaReport` remains exactly 20 keys; neither M5a nor R1 changed the
-schema. The uncommitted frontend is now tenant-only: bundled runtime documents,
-local TypeScript agents, anonymous generation, local upload/report stores and
-seeded activity were removed. `main` and `origin/main` are synchronized before
-these uncommitted changes.
+schema. The uncommitted presentation work makes a persisted M5a run with zero
+accepted claims a first-class compact report state; claim generation and
+persistence are unchanged.
+
+## Zero-accepted-claims presentation (uncommitted)
+
+- One shared frontend predicate requires a persisted M5a claim audit with zero
+  accepted decisions plus empty workflow, risk and suggested-action arrays.
+- Report detail, print/PDF and library score cards reuse that rule. Zero-claim
+  detail is single-column; citations use frozen report-local bindings in a
+  responsive grid with expandable excerpts; feedback and source audit remain.
+- The claims BFF preserves refreshed session cookies on success and every
+  backend error status. Report-local citation excerpt fallback is allowed only
+  for an explicit demo corpus, never tenant, unavailable or future modes.
+- A missing legacy claim audit is a compatibility state, not a zero-claim result:
+  its persisted baseline score and normal report access remain visible.
+- Synthetic seven-agent durations and formula-derived relevance/completeness
+  charts are no longer presented as execution/evidence telemetry. The legacy
+  confidence value is labelled as a document-count baseline only for non-empty
+  analytical reports; zero output is `N/A`.
+- Zero-claim PDF omits analytical/checklist pages and uses two compact sections.
+  DOCX guards empty workflow/risk/action sections and suppresses its positive
+  score while preserving its persisted-snapshot-only renderer boundary.
 
 ## M5a integrated (deterministic claim engine)
 
@@ -112,6 +132,16 @@ Verified on the uncommitted tenant-only frontend conversion:
   added tenant Documents/Workspace/Running and runtime-removal coverage).
 - `tsc --noEmit`: **passed**; ESLint: **0 errors, 6 existing hook warnings**;
   Next production build: **passed** and exposes no `/api/demo/*` route.
+
+Verified on the uncommitted zero-claim presentation fix:
+
+- Frontend Vitest: **80 passed** across 11 files; `tsc --noEmit`: **passed**; ESLint: **0 errors,
+  6 existing hook warnings**; production build: **passed**.
+- Focused DOCX renderer: **32 passed**.
+- Authenticated browser smoke against the persisted zero-claim report at 1440,
+  1366, 820 and 390 CSS px: no overflow, analytical sections, timeline or
+  positive score; source audit and feedback visible. Print: 2 sections; PDF
+  emitted; DOCX returned 200 with the expected MIME type.
 
 Pre-integration context (M5a worktree, before the R1 merge and LF pin — **not**
 re-run on merged `main`):

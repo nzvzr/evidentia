@@ -1476,3 +1476,41 @@ playbook and sidebar libraries load persisted reports or show honest empty state
 **Boundary.** This is a frontend runtime and UX decision. Backend migrations,
 models, immutable M3/M4/M5a module data, claim behavior, DOCX rendering and golden
 fixtures are unchanged.
+
+## 2026-07-20 — Zero accepted claims are a first-class presentation state
+
+**Decision.** Report UI derives the zero-claim state from the persisted M5a claim
+audit and compatibility projection: claim engine enabled, exactly zero accepted
+decisions, and empty workflow, risk and suggested-action arrays. Summary text is
+never parsed. The audit stays outside the 20-key `EvidentiaReport` and is read
+through its existing tenant-scoped backend endpoint plus a Next BFF route.
+
+Zero-claim report detail is a compact full-width flow. It distinguishes pipeline
+completion, frozen evidence scope and analytical confidence; the latter is `N/A`
+when there is no accepted output. Frozen citations render from report-local audit
+bindings with expandable excerpts. Print/PDF contains only identity, honest
+status, facts, configured persona context and source provenance. DOCX adds the
+empty-section and score guards available from its persisted renderer snapshot,
+without adding retrieval, reasoning, current-version reads or LLM use.
+
+**Telemetry boundary.** `passagesIndexed` is `selected section count × 41`, the
+seven agent durations are constants, and document relevance, citation coverage,
+workflow completeness and persona relevance are deterministic display formulas.
+They are not execution or grounding telemetry and are not presented as such.
+For non-empty legacy reports, the public confidence field is explicitly labelled
+a document-count baseline rather than claim grounding confidence. No claim gate,
+threshold, M5a persistence/provenance, retrieval behavior, schema or fixture is
+changed by this presentation decision.
+
+## 2026-07-20 — Zero-claim presentation review invariants
+
+The claims BFF follows the shared session contract: once an authenticated backend
+call returns rotated credentials, the outgoing response persists them regardless
+of the backend status. Backend status codes and enumeration-safe bodies remain
+unchanged, and no authenticated fallback exists.
+
+Claim-audit loading (`undefined`), legacy absence (`null`) and a structured audit
+are distinct presentation states. Only the structured zero-claim predicate can
+replace the persisted baseline score. Interactive and print citation renderers
+allow report-local excerpt compatibility only for an explicit `demo` corpus;
+tenant, absent and unknown corpus modes require a frozen binding.
