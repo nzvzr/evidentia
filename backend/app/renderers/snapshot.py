@@ -208,6 +208,16 @@ class ReportView:
             "deterministic": "Deterministic",
         }.get(self.generation_mode, "Deterministic")
 
+    @property
+    def analytical_output_empty(self) -> bool:
+        """Whether the persisted compatibility projection has no analytical items.
+
+        DOCX does not receive the separate M5a decision audit, so this property
+        is intentionally only an empty-section guard, not the UI's exact
+        zero-accepted-claim predicate.
+        """
+        return not self.workflow_steps and not self.risks and not self.suggested_actions
+
 
 # --- source-audit projection views -----------------------------------------
 

@@ -79,9 +79,12 @@ class DocxRenderer:
             self._table_of_contents(document)
         self._executive_summary(document, snapshot)
         self._analysis_overview(document, snapshot)
-        self._workflow(document, snapshot)
-        self._risk_register(document, snapshot)
-        self._recommendations(document, snapshot)
+        if snapshot.report.workflow_steps:
+            self._workflow(document, snapshot)
+        if snapshot.report.risks:
+            self._risk_register(document, snapshot)
+        if snapshot.report.suggested_actions:
+            self._recommendations(document, snapshot)
         self._citations(document, snapshot, options)
         if options.include_audit_appendix:
             self._audit_appendix(document, snapshot)
@@ -212,8 +215,10 @@ class DocxRenderer:
         rows.append(("Generated", _format_stamp(report)))
         rows.append(("Corpus", _corpus_label(snapshot)))
         rows.append(("Generation", _generation_label(report)))
-        if report.confidence:
-            rows.append(("Confidence", f"{report.confidence}% grounding score"))
+        if report.confidence and not report.analytical_output_empty:
+            rows.append(("Baseline score", f"{report.confidence}% document-count heuristic"))
+        elif report.analytical_output_empty:
+            rows.append(("Analytical confidence", "N/A — no accepted claims to score"))
         rows.append(("Renderer", RENDERER_VERSION))
         rows.append(("Report id", report.id or "—"))
         _definition_table(document, rows)
@@ -241,15 +246,21 @@ class DocxRenderer:
         metrics = report.metrics
         if metrics.present:
             _para(document, "Headline metrics", "Heading 2")
-            rows = [
-                ("Documents analyzed", str(metrics.documents_analyzed)),
-                ("Passages indexed", f"{metrics.passages_indexed:,}"),
-                ("Citations used", str(metrics.citations_used)),
-                ("Risks flagged", str(metrics.risks_flagged)),
-                ("Confidence", f"{metrics.confidence}%"),
-            ]
-            if metrics.compliance_sensitivity:
-                rows.append(("Compliance sensitivity", metrics.compliance_sensitivity))
+            if report.analytical_output_empty:
+                rows = [
+                    ("Frozen source versions", str(snapshot.audit.source_version_count) if snapshot.audit.present else "—"),
+                    ("Selected evidence sections", str(snapshot.audit.evidence_section_count) if snapshot.audit.present else "—"),
+                    ("Source bindings", str(len(snapshot.audit.evidence_bindings))),
+                    ("Analytical confidence", "N/A — no accepted claims to score"),
+                ]
+            else:
+                rows = [
+                    ("Documents analyzed", str(metrics.documents_analyzed)),
+                    ("Citations used", str(metrics.citations_used)),
+                    ("Risks flagged", str(metrics.risks_flagged)),
+                    ("Workflow steps", str(len(report.workflow_steps))),
+                    ("Baseline score", f"{metrics.confidence}% document-count heuristic"),
+                ]
             _definition_table(document, rows)
 
     def _analysis_overview(self, document, snapshot: ReportSnapshot) -> None:
@@ -259,7 +270,13 @@ class DocxRenderer:
 
         brief = report.persona_brief
         if brief.description:
-            _para(document, "Persona brief", "Heading 2")
+            _para(document, "Configured persona context" if report.analytical_output_empty else "Persona brief", "Heading 2")
+            if report.analytical_output_empty:
+                _para(
+                    document,
+                    "User-selected configuration used to scope the analysis; this is not an evidence-derived finding.",
+                    S.S_BODY,
+                )
             _para(document, brief.description, S.S_BODY)
         if brief.priorities:
             _para(document, "Priorities", "Heading 3")

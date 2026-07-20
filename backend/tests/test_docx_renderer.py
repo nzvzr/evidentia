@@ -387,14 +387,29 @@ def test_live_current_version_pointer_cannot_alter_frozen_excerpt():
 # --- optional sections omitted honestly -----------------------------------
 
 
-def test_empty_workflow_is_labelled_not_faked():
+def test_empty_workflow_section_is_omitted():
     text = _document_xml(_render(_report(workflowSteps=[])))
-    assert "No workflow steps could be grounded" in text
+    assert "Recommended workflow" not in text
+    assert "No workflow steps could be grounded" not in text
 
 
-def test_empty_risks_are_labelled_not_faked():
+def test_empty_risk_section_is_omitted():
     text = _document_xml(_render(_report(risks=[])))
-    assert "No risks met the evidence-support threshold" in text
+    assert "Risk register" not in text
+    assert "No risks met the evidence-support threshold" not in text
+
+
+def test_empty_analytical_output_omits_actions_and_positive_grounding_score():
+    text = _document_xml(_render(_report(
+        workflowSteps=[],
+        risks=[],
+        suggestedActions=[],
+    )))
+    assert "Recommendations &amp; next actions" not in text
+    assert "No suggested actions were recorded" not in text
+    assert "grounding score" not in text
+    assert "N/A — no accepted claims to score" in text
+    assert "Configured persona context" in text
 
 
 def test_missing_source_audit_is_handled_honestly():
