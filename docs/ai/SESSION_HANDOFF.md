@@ -2,59 +2,56 @@
 
 _Last updated: 2026-07-20. Keep under 100 lines._
 
-## Current branch and integrated milestones
+## Current branch and worktree
 
-`main` integrates M4 + M5a (deterministic claim engine) + DOCX Renderer R1. HEAD
-is `a76506b`; the worktree is clean (no uncommitted changes). Both feature tracks
-are merged:
+`main` integrates M4 + M5a (deterministic claim engine) + DOCX Renderer R1. Both
+`main` and `origin/main` point to `7c8fe47`. The current tenant-only frontend
+conversion is intentionally uncommitted for review. No branch, commit, push or PR
+was created for this conversion.
 
-- M5a: merge `d7cc4b6` (feature `17406c6`), migration `f5a6c7d8e9b0` after M4
-  revision `e4b7c9d2a610`.
-- R1: merge `ae4f1b7` (feature `112d947`).
-- Follow-up commits on `main`: `1e19b29` (LF pin + root `.gitattributes`) and
-  `a76506b` (Next `middleware.ts` → `proxy.ts`, committed).
+The temporary `tmp/m5a` and `tmp/docx-renderer` branches/worktrees still exist for
+rollback/reference; do not remove them before the eventual push.
 
-The temporary branches/worktrees `tmp/m5a` and `tmp/docx-renderer` still exist for
-rollback/reference until final verification and push; remove them only **after**
-the push. `origin/main` is still on M4 (`e470388`) — local `main` is 6 commits
-ahead, 0 behind. Distinguish local `main` from `origin/main` from real Git output,
-not assumption.
+## Tenant-only frontend conversion
 
-## Verified integration results
+- Documents renders only company-owned rows from `/api/documents`; bundled rows
+  without `companyId` are discarded. Counts cover real documents,
+  generation-eligible current versions, active processing and real section totals.
+- Corpus-off/backend-down states are explicit. The legacy JSON/local upload path,
+  session upload UI, sample corpus, fake statistics and detail drawer are removed.
+- Workspace lists only current versions with `stage=ready`, `finalized=true` and
+  `generationEligible=true`. It sends real document ids to the authenticated
+  `/api/generate-workflow` path and disables Run when no eligible selection exists.
+- Workspace/pending keys are now `evidentia:tenant-workspace:v2` and
+  `evidentia:tenant-pending-run:v2`. Old bundled selections and public-demo keys
+  are ignored/removed.
+- Running uses honest indeterminate progress and a slow-request notice; there is
+  no fictional per-agent/stage completion. Success navigates on the persisted id.
+- Reports, playbooks and sidebar recents load persisted tenant reports or render
+  honest empty states. Landing-page document examples no longer mimic activity or
+  claim unsupported formats.
+- Removed anonymous/local runtime generation: the `/api/demo/generate-workflow`
+  route, bundled corpus/report/scenario data, TypeScript agents/tools/LLM provider,
+  browser report store and the orphaned anonymous rate limiter. Removed the unused
+  frontend `openai` package dependency.
 
-Verified on the merged `main` (post LF pin):
+## Frontend verification
 
-- Immutable M3/golden byte test: **passed**.
-- Golden fixture suite: **59 passed**.
-- Combined focused backend M5a + R1 suite: **113 passed**.
-- Frontend Vitest: **86 passed**.
-- TypeScript (`tsc --noEmit`): **passed**.
-- ESLint: **0 errors, 6 pre-existing warnings**.
-- Next production build: **passed**.
+- `npx vitest run`: **55 passed** (7 files).
+- `npx tsc --noEmit`: **passed**.
+- `npm run lint`: **0 errors, 6 existing React hook warnings**.
+- `npm run build`: **passed**; route manifest has no `/api/demo/*` endpoint.
 
-The full SQLite and full PostgreSQL 16 backend suites have **not** been re-run on
-the merged `main`. Earlier full-suite numbers (833 SQLite / 864 PostgreSQL passed,
-17 golden failures each) are from the pre-merge M5a worktree — before the R1 merge
-and the LF pin — and do not describe the integrated tree.
+## Backend integrity
 
-## Pending final verification
+No backend code, migration, database model, immutable M3/M4/M5a module data,
+claim-engine behavior, DOCX renderer or golden fixture was modified. The earlier
+integrated backend verification remains recorded in `PROJECT_STATE.md`.
 
-1. Full SQLite backend suite on merged `main`.
-2. Full PostgreSQL 16 backend suite on merged `main`.
-3. Confirm the migration graph / `alembic check` drift on the final integrated
-   tree if not re-run (expect only the four legacy auth nullability drifts).
-4. Inspect `git status` / `git diff`.
-5. Push `main` to `origin`.
-6. Remove the temporary `tmp/m5a` / `tmp/docx-renderer` worktrees/branches only
-   after the push.
+## Pending final integration work
 
-## Known non-blocking follow-ups
-
-- Retrieval-miss corrected-section snapshot membership remains application-
-  enforced; it is advisory and cannot change claim acceptance.
-- Matcher runtime budget exhaustion fails closed as a generation failure rather
-  than a typed `ClaimDecision`.
-- Six existing React hook lint warnings.
-- Python/FastAPI/SQLAlchemy deprecation warnings.
-- Broader M5b production pattern authoring remains deferred.
-- PDF/PPTX and other renderers remain deferred.
+1. Review the uncommitted tenant-only frontend diff.
+2. Full SQLite backend suite on merged `main`.
+3. Full PostgreSQL 16 backend suite on merged `main`.
+4. Confirm final migration graph / `alembic check` drift if not re-run.
+5. Commit and push only after review; remove temporary worktrees only afterward.

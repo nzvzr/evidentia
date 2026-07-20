@@ -22,7 +22,7 @@ Evidentia now includes:
 - a **Next.js API route** backend (`POST /api/generate-workflow`)
 - a **deterministic multi-agent pipeline** (no LLM required)
 - an **optional LLM-assisted refinement layer** (OpenAI, off by default)
-- a local **demo document corpus** (Markdown + metadata)
+- an authenticated **tenant document corpus** (Markdown + plain text)
 - a **report library** and interactive dashboard
 - a **playbook / PDF export** page (print-ready A4)
 - a **documents manager**
@@ -34,9 +34,8 @@ Evidentia now includes:
 The Python backend is **required**. It owns authentication, tenancy and
 persistence, and authenticated routes have no fallback: with the backend
 unreachable or `EVIDENTIA_BACKEND_URL` unset, they return **503**. Authenticated
-reports live only in the database, never in `localStorage`. The TypeScript
-pipeline is reachable only at the anonymous public-demo route
-(`/api/demo/generate-workflow`), which persists nothing.
+reports live only in the database, never in `localStorage`. There is no anonymous
+or browser-local generation route.
 
 ---
 
@@ -48,7 +47,7 @@ When you select documents, a market, and a persona (or a custom role) and click 
 Document Ingest → Persona Modeler → Semantic Retrieval → Risk Analyzer → Citation Binder → Metrics Agent → Playbook Composer
 ```
 
-Each agent contributes one structured part of the final report — parsed sections, a persona brief, ranked evidence, risks, bound citations, metrics, and the assembled playbook. The pipeline runs in the Python backend, which authenticates the caller and persists the report to their organization. A public, anonymous sample of the same pipeline is available at `/api/demo/generate-workflow` (no account, no persistence).
+Each agent contributes one structured part of the final report — parsed sections, a persona brief, ranked evidence, risks, bound citations, metrics, and the assembled playbook. The pipeline runs in the Python backend, which authenticates the caller and persists the report to their organization.
 
 ---
 
@@ -80,11 +79,11 @@ The report dashboard shows a **Deterministic** / **LLM-assisted** badge, and the
 
 ---
 
-## Optional Python backend
+## Required Python backend
 
 A parallel **FastAPI** implementation of the same pipeline lives in [`backend/`](./backend). It returns the identical `EvidentiaReport` JSON and can own the LLM keys server-side.
 
-- The Next.js API route (`app/api/generate-workflow/route.ts`) is an authenticated **proxy** to the Python backend. It has **no fallback**: if the backend cannot validate the session, it returns 503 and generates nothing — a report on this route belongs to a real account and is persisted to that tenant. The TypeScript pipeline survives only at `/api/demo/generate-workflow` (anonymous, public corpus, persists nothing).
+- The Next.js API route (`app/api/generate-workflow/route.ts`) is an authenticated **proxy** to the Python backend. It has **no fallback**: if the backend cannot validate the session, it returns 503 and generates nothing — a report on this route belongs to a real account and is persisted to that tenant.
 - The frontend never sees API keys — the Python backend owns them.
 
 Run the backend:
@@ -126,11 +125,11 @@ Then open **http://localhost:3000** and walk the flow:
 
 1. `/` — landing page (nav links smooth-scroll to Product / Security / Docs / Pricing; "Sign in" opens the mock auth modal).
 2. `/workspace` — select documents, a market, and a persona (or describe a custom role), then **Run workflow**.
-3. `/running` — the visible 7-agent pipeline animates, then redirects to the generated report.
+3. `/running` — shows indeterminate backend progress, then redirects to the persisted report.
 4. `/reports/[id]` — the persona-aware dashboard. Click **Export playbook (PDF)**.
 5. `/playbook/[id]/print` — a dedicated 6-page A4 export preview. Click **Print / Save as PDF**.
 
-Generated reports are persisted **in the database, scoped to your organization**, and re-fetched from the backend by id; `/reports`, `/playbooks`, and `/documents` list the demo corpus and the reports your tenant has generated. Nothing authenticated is cached in `localStorage` — only the anonymous public demo (`evidentia:public-demo:*`) may persist in the browser.
+Generated reports are persisted **in the database, scoped to your organization**, and re-fetched from the backend by id; `/reports`, `/playbooks`, and `/documents` list only authenticated tenant data. Nothing authenticated is cached in `localStorage`; browser storage is limited to versioned transient workspace/run input and is purged on session changes.
 
 Production build:
 
@@ -171,7 +170,7 @@ Users can:
 1. Select or upload company documents.
 2. Select a market or region.
 3. Select a persona or describe a custom role.
-4. Run a visible 7-agent workflow.
+4. Run the authenticated backend workflow.
 5. Generate a dashboard with key insights, risks, citations, and metrics.
 6. Export the output as a clean persona-specific PDF playbook.
 
@@ -192,7 +191,7 @@ Choose market
    ↓
 Choose persona or custom role
    ↓
-Run 7-agent workflow
+Run authenticated workflow
    ↓
 Generated dashboard/report
    ↓
@@ -342,20 +341,16 @@ Assembles the final output:
 
 ## Input Documents
 
-The MVP can work with demo enterprise documents such as:
+The tenant corpus accepts organization-owned Markdown and plain-text material such as:
 
 ```txt
-Security & Compliance Whitepaper
-Platform API Reference
-SLA & Uptime Commitment
-Deployment & Migration Guide
-Data Residency & Sovereignty Policy
-Incident Response Runbook
-Pricing & Packaging Sheet
-Customer Onboarding Handbook
+Policies and standards
+Operating procedures and runbooks
+Technical reference notes
+Enablement and onboarding guides
 ```
 
-These simulate scattered internal documentation used by enterprise teams.
+Documents are ingested, finalized and checked for generation eligibility before use.
 
 ---
 
@@ -619,7 +614,7 @@ evidentia/
 │   │   │   └── page.tsx          # /reports/[id] — interactive dashboard
 │   │   └── page.tsx              # /reports — reports library
 │   ├── running/
-│   │   └── page.tsx              # /running — animated pipeline
+│   │   └── page.tsx              # /running — indeterminate backend progress
 │   ├── workspace/
 │   │   └── page.tsx              # /workspace — configuration flow
 │   ├── globals.css               # theme + print CSS
@@ -633,56 +628,19 @@ evidentia/
 │   ├── SettingsModal.tsx
 │   ├── SignInForm.tsx
 │   └── SignUpForm.tsx
-├── data/
-│   ├── documents/                # demo corpus (Markdown source of truth)
-│   │   ├── security-compliance-whitepaper.md
-│   │   ├── platform-api-reference.md
-│   │   ├── sla-uptime-commitment.md
-│   │   ├── deployment-migration-guide.md
-│   │   ├── data-residency-sovereignty-policy.md
-│   │   ├── incident-response-runbook.md
-│   │   ├── pricing-packaging-sheet.md
-│   │   └── customer-onboarding-handbook.md
-│   ├── documentContent.ts        # isomorphic mirror of the .md files
-│   ├── demoDocuments.ts          # document metadata (slugs, citation ids)
-│   ├── scenarios.ts              # demo pipeline scenarios
-│   └── demoReports.ts            # precomputed fallback reports
 ├── lib/
-│   ├── agents/
-│   │   ├── orchestrator.ts       # runEvidentiaAgents (deterministic)
-│   │   ├── llmOrchestrator.ts    # runEvidentiaAgentsV2 (LLM-assisted + fallback)
-│   │   ├── documentReaderAgent.ts
-│   │   ├── personaMapperAgent.ts
-│   │   ├── workflowBuilderAgent.ts
-│   │   ├── riskAgent.ts
-│   │   ├── citationAgent.ts
-│   │   ├── metricsAgent.ts
-│   │   ├── reportAgent.ts
-│   │   └── llm/                  # optional LLM refinement agents
-│   │       ├── llmPersonaAgent.ts
-│   │       ├── llmWorkflowAgent.ts
-│   │       ├── llmRiskAgent.ts
-│   │       ├── llmCitationAgent.ts
-│   │       └── llmReportAgent.ts
-│   ├── llm/
-│   │   └── provider.ts           # generateStructuredObject (OpenAI, server-only)
-│   ├── tools/
-│   │   └── documentTools.ts      # deterministic app-side tools for agents
-│   ├── env.ts                    # server-only env config (never client-exposed)
-│   ├── reportsStore.ts           # PUBLIC DEMO report only (never authenticated data)
-│   ├── workspaceMapping.ts       # UI selection → pipeline input
-│   ├── pendingRun.ts
+│   ├── tenantDocuments.ts        # authenticated tenant document API state
+│   ├── reportsApi.ts             # persisted tenant report API reads
+│   ├── workflowGeneration.ts     # authenticated single-flight generation
+│   ├── workspaceMapping.ts       # tenant selection → backend input
+│   ├── pendingRun.ts             # versioned transient run input
 │   ├── types.ts
-│   ├── demoDocs.ts               # UI document corpus
-│   ├── demoReport.ts
 │   ├── personas.ts
 │   ├── markets.ts
 │   ├── scenarios.ts              # report categories + playbook templates
-│   ├── uploads.ts
-│   ├── useMockAuth.ts
 │   ├── useSettings.ts
 │   └── useWorkspace.ts
-├── backend/                      # optional Python FastAPI backend
+├── backend/                      # required Python FastAPI backend
 │   ├── app/
 │   │   ├── main.py               # FastAPI app (health, documents, generate)
 │   │   ├── core/
@@ -706,7 +664,7 @@ evidentia/
 │   │   ├── services/
 │   │   │   └── llm.py            # OpenAI wrapper (server-only, safe fallback)
 │   │   └── data/
-│   │       └── documents/        # same demo corpus (Markdown)
+│   │       └── documents/        # backend benchmark fixtures
 │   ├── requirements.txt
 │   ├── .env.example
 │   └── README.md
@@ -735,7 +693,7 @@ The MVP should include:
 - market selection
 - persona selection
 - custom role input
-- visible 7-agent running screen
+- honest indeterminate running screen
 - generated dashboard report
 - source citations
 - risk cards
@@ -745,7 +703,7 @@ The MVP should include:
 - print-friendly playbook export
 - Vercel deployment
 
-The core workflow should work with demo data and deterministic logic, with optional GPT/Claude enhancement.
+The core workflow uses finalized tenant data and deterministic logic, with optional LLM refinement.
 
 ---
 
@@ -762,13 +720,13 @@ Honest and practical:
 - no real RAG infrastructure required for the MVP
 - clean modular architecture
 - polished UI first
-- demo flow end-to-end — but the public demo is a *separate, anonymous* route that
-  persists nothing, never a fallback for a signed-in user
+- tenant workflow end-to-end through the authenticated backend, with no local
+  evidence or generation fallback
 
 This is a hackathon MVP showing the core interaction:
 
 ```txt
-Static docs → selected role + market → 7-agent pipeline → dashboard → exportable playbook
+Tenant docs → selected role + market → backend pipeline → dashboard → exportable playbook
 ```
 
 ---

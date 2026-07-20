@@ -5,23 +5,17 @@ _Stable design. Update only when the design itself changes._
 ## Overview
 
 The product is **authenticated and multi-tenant**, and the Python backend owns
-authentication, tenancy and persistence. There are exactly two request paths, and
-they do not overlap:
+authentication, tenancy and persistence. The product has one runtime request
+path:
 
 ```
-Browser ─▶ Next.js BFF (App Router UI + API routes)
-                │
-                ├─ AUTHENTICATED  ─▶ Python FastAPI backend ─▶ report ─▶ PostgreSQL
-                │   /api/generate-workflow, /api/reports, /api/documents, /api/auth/*
-                │   backend unreachable or unset ──▶ 503. There is NO fallback.
-                │
-                └─ PUBLIC DEMO    ─▶ TypeScript deterministic pipeline (lib/agents/*)
-                    /api/demo/generate-workflow only: anonymous, fixed showcase
-                    input, public corpus, persists NOTHING.
+Browser ─▶ Next.js BFF ─▶ Python FastAPI backend ─▶ PostgreSQL
+             /api/generate-workflow, /api/reports, /api/documents, /api/auth/*
+             backend unreachable or unset ──▶ 503. There is NO fallback.
 ```
 
-Both pipelines emit the same `EvidentiaReport` JSON (camelCase), and the frontend
-renders either and can print a 6-page A4 playbook.
+The backend emits the `EvidentiaReport` compatibility JSON (camelCase), and the
+frontend renders persisted tenant reports and export views.
 
 **No authenticated route has a fallback of any kind.** A report on an
 authenticated route belongs to a real account and is persisted to that tenant, so
@@ -31,15 +25,11 @@ it may only be produced by a session the backend actually validated:
   generated report. Cookie *presence* is never treated as proof of a session.
 - Authenticated reports and documents live **only in the database**. Nothing
   authenticated is cached in `localStorage`; a backend 404 never falls back to a
-  local report. Only `evidentia:public-demo:*` keys may persist in the browser.
+  local report. Browser storage holds only versioned, session-scoped workspace
+  input and pending-run nonces, and is purged on session changes.
 - `EVIDENTIA_DB_ENABLED=false` is **refused at startup in production** — without
   the database there is no authentication, no tenancy, and generation cannot keep
   its "200 means saved" promise.
-
-The TypeScript pipeline survives **only** behind `POST /api/demo/generate-workflow`,
-which is explicitly anonymous (it never reads session cookies), takes a fixed
-showcase input (so it is not a free open-ended LLM endpoint), reads only the public
-demo corpus, persists nothing, and is IP-rate-limited.
 
 ## Authenticated frontend generation lifecycle
 
@@ -51,11 +41,11 @@ settled entries are removed immediately, and a real unmount aborts after a
 zero-delay replay grace period. The nonce is purged on login/logout/session loss,
 so a flight cannot be reused across sessions; report content is never cached.
 
-Request completion and the seven-stage presentational animation are explicit,
-independent state. A dedicated effect navigates once, and only once, after both
-the persisted report id and animation completion exist. Effect ownership checks
-prevent stale timers or async completions from updating or navigating a newer run.
-Retry creates a fresh nonce and therefore a fresh logical request.
+The backend does not stream stage or agent progress, so `/running` uses an honest
+indeterminate state plus a slow-request notice. It never marks an internal stage
+complete without backend data. A successful response already represents a
+persisted report; the page navigates once to that report id. Retry creates a fresh
+nonce and therefore a fresh logical request.
 
 ## Deterministic-first principle
 

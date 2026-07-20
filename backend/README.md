@@ -7,9 +7,8 @@ optionally use an LLM (OpenAI) for refinement.
 
 The Next.js API route (`app/api/generate-workflow/route.ts`) is an authenticated
 proxy to this backend. It has **no fallback**: if the backend cannot validate the
-session, it returns 503 and nothing is generated or saved. The TypeScript pipeline
-is reachable only at the anonymous `/api/demo/generate-workflow` (public corpus,
-persists nothing).
+session, it returns 503 and nothing is generated or saved. The Next.js runtime has
+no anonymous or local generation pipeline.
 
 ## Endpoints
 
@@ -325,5 +324,4 @@ EVIDENTIA_BACKEND_URL=http://localhost:8000
 ```
 
 With that set, the Next.js route forwards requests to this backend. Without it
-the frontend returns 503 for authenticated generation — there is no fallback. The
-TypeScript pipeline is reachable only at the anonymous `/api/demo/generate-workflow`.
+the frontend returns 503 for authenticated generation — there is no fallback.

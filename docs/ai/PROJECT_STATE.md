@@ -1,17 +1,21 @@
 # Evidentia — Project State
 
 _Concise snapshot. Last updated: 2026-07-20. `main` integrates M4 + M5a + DOCX
-Renderer R1 (merged and committed, not yet pushed). `origin/main` is still on M4._
+Renderer R1. The worktree also contains an uncommitted tenant-only frontend
+conversion for review. `main` and `origin/main` both point to `7c8fe47`._
 
 ## Current milestone
 
 `main` integrates M4 + M5a (deterministic claim engine) + DOCX Renderer R1. Both
 tracks were developed in parallel worktrees and are now merged into `main`. The
 M5a claim engine sits behind the default-off `EVIDENTIA_CLAIM_ENGINE_ENABLED`
-rollout flag (flag off remains the exact M4 path; demo generation is unchanged),
+rollout flag (flag off remains the exact M4 path),
 and the DOCX renderer is a pure transformation of persisted report snapshots. The
 public `EvidentiaReport` remains exactly 20 keys; neither M5a nor R1 changed the
-schema. `origin/main` is still on M4 pending the final push.
+schema. The uncommitted frontend is now tenant-only: bundled runtime documents,
+local TypeScript agents, anonymous generation, local upload/report stores and
+seeded activity were removed. `main` and `origin/main` are synchronized before
+these uncommitted changes.
 
 ## M5a integrated (deterministic claim engine)
 
@@ -84,8 +88,10 @@ format-independent renderer protocol; PDF/PPTX and others remain deferred.
   line endings`) adds the root `.gitattributes` forcing LF on
   `backend/app/modules/**/*.json` and `backend/tests/golden/**/*.{json,md,txt}`.
 - Middleware→proxy migration: `a76506b` (`chore: migrate Next middleware to
-  proxy`) renames `middleware.ts` → `proxy.ts`. It **is** committed — it is the
-  current `main` HEAD — and the worktree is clean.
+  proxy`) renames `middleware.ts` → `proxy.ts`. It **is** committed and remains
+  in history. The documentation commit `7c8fe47` is the current `main` and
+  `origin/main` HEAD; the tenant-only frontend changes are intentionally
+  uncommitted for review.
 - Deterministic module and golden inputs are pinned to LF through the root
   `.gitattributes`, which is committed (in `1e19b29`).
 
@@ -99,6 +105,13 @@ Verified on the integrated `main` (post-merge, post LF pin):
 - Frontend Vitest: **86 passed** (M5a feedback controls + R1 DOCX button/BFF route
   tests over the prior 56); `tsc --noEmit`: **passed**; ESLint: **0 errors, 6
   pre-existing hook warnings**; Next production build: **passed**.
+
+Verified on the uncommitted tenant-only frontend conversion:
+
+- Frontend Vitest: **55 passed** across 7 files (removed demo/rate-limit suites;
+  added tenant Documents/Workspace/Running and runtime-removal coverage).
+- `tsc --noEmit`: **passed**; ESLint: **0 errors, 6 existing hook warnings**;
+  Next production build: **passed** and exposes no `/api/demo/*` route.
 
 Pre-integration context (M5a worktree, before the R1 merge and LF pin — **not**
 re-run on merged `main`):

@@ -46,7 +46,8 @@ of everything below:
    is valid.**
 7. **Protocol seams** for providers, retrievers, blob storage, job queues and
    rate-limit stores.
-8. **The demo corpus remains** the benchmark bed and the public sample corpus.
+8. **The bundled corpus remains only as a backend benchmark bed**; it is not a
+   frontend runtime corpus or anonymous product route.
 9. **Authentication, multi-tenancy and the evaluation framework are not
    redesigned** (see `ARCHITECTURE.md` for the auth/tenancy design).
 

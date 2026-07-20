@@ -1456,3 +1456,23 @@ artifact. Golden outputs were not re-recorded to conceal an M5a regression.
 response path (success and error). Export responses are bounded using both the
 declared Content-Length and the actual streamed bytes, and an oversized chunked
 body is cancelled.
+
+## 2026-07-20 — Frontend runtime is tenant-only
+
+**Decision.** The Next.js product runtime has one evidence path: authenticated
+tenant documents and persisted tenant reports through the FastAPI backend. The
+anonymous TypeScript generation route, bundled document corpus, local agents,
+seeded report/activity data, local report store and legacy JSON/session upload
+path are removed. Backend-unavailable or feature-disabled states are explicit and
+never substitute local evidence.
+
+Workspace selection stores only real tenant document ids whose current versions
+are ready, finalized and generation-eligible. Versioned workspace and pending-run
+keys invalidate hybrid-era bundled ids; session migration also removes old public
+demo keys. `/running` uses indeterminate progress because the backend exposes no
+stage stream, and navigates only after a persisted report id is returned. Report,
+playbook and sidebar libraries load persisted reports or show honest empty states.
+
+**Boundary.** This is a frontend runtime and UX decision. Backend migrations,
+models, immutable M3/M4/M5a module data, claim behavior, DOCX rendering and golden
+fixtures are unchanged.
