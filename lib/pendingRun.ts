@@ -1,7 +1,7 @@
 import type { AgentInput } from "./types";
 
-/** localStorage key holding the pipeline input for the pending run. */
-export const PENDING_RUN_KEY = "evidentia:pending-run";
+/** Versioned so pending runs containing bundled document ids are ignored. */
+export const PENDING_RUN_KEY = "evidentia:tenant-pending-run:v2";
 
 export interface PendingRun {
   /** A fresh, non-secret nonce for one click/retry. */
@@ -26,7 +26,7 @@ export function writePendingRun(input: AgentInput): PendingRun {
   try {
     window.localStorage.setItem(PENDING_RUN_KEY, JSON.stringify(pendingRun));
   } catch {
-    /* ignore */
+    /* ignore unavailable browser storage */
   }
   return pendingRun;
 }
@@ -36,17 +36,20 @@ export function readPendingRun(): PendingRun | null {
   try {
     const raw = window.localStorage.getItem(PENDING_RUN_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PendingRun | AgentInput;
+    const parsed = JSON.parse(raw) as PendingRun;
     if (
-      typeof (parsed as PendingRun).id === "string" &&
-      (parsed as PendingRun).input &&
-      typeof (parsed as PendingRun).input === "object"
+      typeof parsed.id === "string" &&
+      parsed.input &&
+      typeof parsed.input === "object" &&
+      Array.isArray(parsed.input.selectedDocumentIds) &&
+      parsed.input.selectedDocumentIds.length > 0 &&
+      parsed.input.selectedDocumentIds.every(
+        (id) => typeof id === "string" && id.length > 0,
+      )
     ) {
-      return parsed as PendingRun;
+      return parsed;
     }
-
-    // One-release compatibility for a run started by the previous frontend.
-    return createPendingRun(parsed as AgentInput);
+    return null;
   } catch {
     return null;
   }

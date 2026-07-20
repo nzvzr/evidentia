@@ -1,21 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { UploadedDoc } from "./types";
 
 /**
  * Tenant documents for the Documents page.
  *
- * One hook serves both feature states, driven by the backend's additive
- * `tenantCorpus` config on GET /api/documents:
- *
- * - **Tenant corpus enabled** — real multipart uploads
- *   (`POST /api/documents/upload`), per-document ingestion state from the
- *   backend's `ingestion` metadata, retry / new-version actions, and a
- *   bounded, lifecycle-safe status poll that runs only while a document is
- *   actively processing.
- * - **Disabled (default)** — the pre-M2 behavior: JSON document creation via
- *   `POST /api/documents` with a local text excerpt, no ingestion claims.
+ * The backend's `tenantCorpus` config on GET /api/documents gates real
+ * multipart uploads, per-document ingestion state, retry/new-version actions,
+ * and a bounded status poll while a tenant document is processing. When that
+ * config is absent or disabled, callers receive an explicit unavailable state;
+ * this hook never creates or persists a browser-local substitute.
  *
  * Nothing is cached in localStorage; the backend is the only source of truth.
  */
@@ -175,36 +169,12 @@ function uploadErrorMessage(status: number, code: string | undefined): string {
   return "Upload failed.";
 }
 
-/** Legacy display mapping (pre-M2 path, corpus disabled). */
-export function toLegacyUploadedDoc(doc: TenantDocument): UploadedDoc {
-  const meta = doc.metadata ?? {};
-  return {
-    id: doc.id,
-    name: doc.title,
-    filename: String(meta.filename ?? doc.title),
-    kind: doc.type ?? "TXT",
-    category: doc.category ?? "Uploaded",
-    sizeLabel: String(meta.sizeLabel ?? ""),
-    uploadedAt: doc.createdAt
-      ? new Date(doc.createdAt).toLocaleDateString("en-US", {
-          month: "short",
-          day: "2-digit",
-          year: "numeric",
-        })
-      : "",
-    excerpt: String(meta.excerpt ?? ""),
-    status: "Indexed",
-  };
-}
-
-/** Client-side guard for the legacy JSON path; the backend caps independently. */
-const LEGACY_MAX_UPLOAD_BYTES = 200_000;
-
 export function useTenantDocuments() {
   const [documents, setDocuments] = useState<TenantDocument[]>([]);
   const [corpus, setCorpus] = useState<TenantCorpusConfig | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   // Stale-response guard: only the newest in-flight refresh may write state.
   const seqRef = useRef(0);
@@ -217,6 +187,8 @@ export function useTenantDocuments() {
       if (!mountedRef.current || seq !== seqRef.current) return;
       if (!res.ok) {
         setDocuments([]);
+        setCorpus(null);
+        setLoadError(true);
         return;
       }
       const data = await res.json();
@@ -225,6 +197,7 @@ export function useTenantDocuments() {
         .filter((d: BackendDoc) => Boolean(d?.companyId))
         .map(toTenantDocument);
       setDocuments(docs);
+      setLoadError(false);
       const cfg = data?.tenantCorpus;
       setCorpus(
         cfg && typeof cfg === "object"
@@ -239,7 +212,11 @@ export function useTenantDocuments() {
           : null,
       );
     } catch {
-      if (mountedRef.current && seq === seqRef.current) setDocuments([]);
+      if (mountedRef.current && seq === seqRef.current) {
+        setDocuments([]);
+        setCorpus(null);
+        setLoadError(true);
+      }
     } finally {
       if (mountedRef.current && seq === seqRef.current) setHydrated(true);
     }
@@ -356,46 +333,6 @@ export function useTenantDocuments() {
     [parseUploadResponse],
   );
 
-  /** Legacy JSON creation (corpus disabled) — the pre-M2 behavior, unchanged. */
-  const addLegacyFile = useCallback(
-    async (file: File): Promise<UploadResult> => {
-      if (file.size > LEGACY_MAX_UPLOAD_BYTES) {
-        return { ok: false, error: "That file is too large (max 200 KB)." };
-      }
-      const text = await file.text();
-      const excerpt = text.replace(/\s+/g, " ").trim().slice(0, 220) || "(empty document)";
-      const ext = file.name.split(".").pop()?.toLowerCase();
-      try {
-        const res = await fetch("/api/documents", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: file.name.replace(/\.(md|txt)$/i, ""),
-            type: ext === "md" ? "MD" : "TXT",
-            category: "Uploaded",
-            contentText: text.slice(0, LEGACY_MAX_UPLOAD_BYTES),
-            metadata: {
-              filename: file.name,
-              sizeLabel: sizeLabel(file.size),
-              excerpt,
-            },
-          }),
-        });
-        if (!res.ok) {
-          return {
-            ok: false,
-            error: res.status === 401 ? "Please sign in again." : "Upload failed.",
-          };
-        }
-        await refresh();
-        return { ok: true };
-      } catch {
-        return { ok: false, error: "Upload failed." };
-      }
-    },
-    [refresh],
-  );
-
   const remove = useCallback(
     async (id: string) => {
       await fetch(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -408,6 +345,7 @@ export function useTenantDocuments() {
     documents,
     corpus,
     corpusEnabled: Boolean(corpus?.enabled),
+    loadError,
     hydrated,
     uploading,
     anyProcessing,
@@ -416,7 +354,6 @@ export function useTenantDocuments() {
     uploadNewVersion,
     finalize,
     retry,
-    addLegacyFile,
     remove,
   };
 }

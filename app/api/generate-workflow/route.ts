@@ -39,8 +39,7 @@ function asStringArray(value: unknown): string[] {
  * presence of a cookie is not evidence of anything.
  *
  * If the backend cannot validate the session, this returns **503**, and the
- * caller is told to retry. The public demo pipeline lives at
- * `/api/demo/generate-workflow`, is explicitly anonymous, and persists nothing.
+ * caller is told to retry.
  */
 export async function POST(request: Request) {
   // Bounded before buffering: `request.json()` would read an unlimited body into

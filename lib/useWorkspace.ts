@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_PICKED } from "./demoDocs";
-import type { DocId, WorkspaceSelection } from "./types";
+import type { WorkspaceSelection } from "./types";
 
-const STORAGE_KEY = "evidentia:workspace";
+/** Versioned so bundled-document selections from older builds cannot reappear. */
+export const WORKSPACE_STORAGE_KEY = "evidentia:tenant-workspace:v2";
 
 export const DEFAULT_SELECTION: WorkspaceSelection = {
-  picked: DEFAULT_PICKED,
+  picked: [],
   market: "EMEA",
   persona: "architect",
   custom: "",
@@ -16,11 +16,13 @@ export const DEFAULT_SELECTION: WorkspaceSelection = {
 export function readSelection(): WorkspaceSelection {
   if (typeof window === "undefined") return DEFAULT_SELECTION;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
     if (!raw) return DEFAULT_SELECTION;
     const parsed = JSON.parse(raw) as Partial<WorkspaceSelection>;
     return {
-      picked: Array.isArray(parsed.picked) ? (parsed.picked as DocId[]) : DEFAULT_SELECTION.picked,
+      picked: Array.isArray(parsed.picked)
+        ? parsed.picked.filter((id): id is string => typeof id === "string")
+        : [],
       market: typeof parsed.market === "string" ? parsed.market : DEFAULT_SELECTION.market,
       persona: typeof parsed.persona === "string" ? parsed.persona : DEFAULT_SELECTION.persona,
       custom: typeof parsed.custom === "string" ? parsed.custom : "",
@@ -33,17 +35,12 @@ export function readSelection(): WorkspaceSelection {
 export function writeSelection(selection: WorkspaceSelection): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
+    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(selection));
   } catch {
-    /* ignore */
+    /* ignore unavailable browser storage */
   }
 }
 
-/**
- * Reads the persisted workspace selection on the client.
- * `hydrated` is false during SSR / first paint so consumers can avoid
- * hydration mismatches by rendering defaults until it flips true.
- */
 export function useWorkspaceSelection() {
   const [selection, setSelection] = useState<WorkspaceSelection>(DEFAULT_SELECTION);
   const [hydrated, setHydrated] = useState(false);
