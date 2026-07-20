@@ -1421,3 +1421,38 @@ fresh computation changes only `manifestSha256`; M5a neither changes the committ
 goldens nor claims to fix that separate infrastructure issue. Production-scale
 M5b pattern authorship/calibration, automatic or
 cross-tenant learning, embeddings/FTS, external packs and the full CAD runtime.
+
+## 2026-07-20 — M5a + DOCX Renderer R1 integration (grounding, renderer boundary, LF pin, export BFF)
+
+M5a (deterministic claim engine, merge `d7cc4b6`, feature `17406c6`) and DOCX
+Renderer R1 (merge `ae4f1b7`, feature `112d947`) are integrated into `main`,
+followed by the canonical line-ending pin (`1e19b29`) and the Next
+`middleware.ts` → `proxy.ts` migration (`a76506b`, HEAD). `origin/main` is still
+on M4 until the final push. The decisions settled during integration:
+
+**M5a grounding authority.** Candidate claims are never accepted because an LLM
+selected citations. The complete frozen M4 evidence set is visible to support and
+conflict evaluation; LLM citation codes are hints only. Accepted evidence is
+matcher-attributed, and only accepted claims may influence analytical report
+output (workflow, risks, recommendations, summary, top finding). Pattern packs are
+versioned separately (`compliance.claim-patterns@1.0.0`) from the immutable M3
+classification-module releases (`compliance@1.0.0`, unchanged).
+
+**Renderer boundary.** Renderers consume the persisted report and report-local
+source-audit snapshots only; they do not retrieve, reason, call an LLM or follow
+current-document pointers. DOCX (`docx-renderer-v1`) is the first implementation of
+the format-independent renderer protocol. A missing tenant binding must never be
+represented as frozen evidence. CAD remains deferred until a renderer needs
+structure beyond the existing `EvidentiaReport` projection; R1 did not widen the
+20-key schema.
+
+**Deterministic fixture line endings.** Immutable modules and golden fixtures are
+pinned to LF via the root `.gitattributes` (`1e19b29`). Byte-level identity tests
+use the canonical repository representation; the previously reported
+fresh-vs-committed `manifestSha256` discrepancy was a working-tree line-ending
+artifact. Golden outputs were not re-recorded to conceal an M5a regression.
+
+**Export BFF safety.** Rotated sessions must be persisted on every post-refresh
+response path (success and error). Export responses are bounded using both the
+declared Content-Length and the actual streamed bytes, and an oversized chunked
+body is cancelled.
