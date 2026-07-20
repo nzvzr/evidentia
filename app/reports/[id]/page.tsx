@@ -8,17 +8,22 @@ import { useSession } from "@/components/SessionProvider";
 import {
   fetchBackendReport,
   fetchReportFeedback,
+  fetchReportClaimAudit,
   fetchReportSourceAudit,
   putCitationFeedback,
   putItemFeedback,
   putReportFeedback,
 } from "@/lib/reportsApi";
+import { claimDecisionCounts, hasEmptyAnalyticalProjection, hasZeroAcceptedAnalyticalOutput } from "@/lib/reportPresentation";
 import type {
+  Citation,
   CitationFeedbackVerdict,
   EvidentiaReport,
   ItemFeedbackVerdict,
   ReportFeedbackSnapshot,
   ReportFeedbackVerdict,
+  ReportClaimAudit,
+  ReportEvidenceSource,
   ReportSourceAudit,
 } from "@/lib/types";
 
@@ -32,18 +37,6 @@ const SEV_COLORS: Record<"High" | "Medium" | "Low", string> = {
 
 const INSUFFICIENT = "N/A";
 const isInsufficient = (code: string) => (code || "").trim().toUpperCase() === INSUFFICIENT;
-
-/** Agents refined by the LLM in full (llm-assisted) mode. */
-const LLM_AGENTS = new Set([
-  "Persona Modeler",
-  "Risk Analyzer",
-  "Citation Binder",
-  "Playbook Composer",
-  "Brief Synthesizer",
-]);
-/** Agents refined by the LLM in summary mode (single final call). */
-const SUMMARY_LLM_AGENTS = new Set(["Persona Modeler", "Playbook Composer"]);
-const EMPTY_SET = new Set<string>();
 
 function formatStamp(iso: string): string {
   const d = new Date(iso);
@@ -65,6 +58,7 @@ export default function ReportDetailPage() {
 
   const [report, setReport] = useState<EvidentiaReport | null>(null);
   const [sourceAudit, setSourceAudit] = useState<ReportSourceAudit | null>(null);
+  const [claimAudit, setClaimAudit] = useState<ReportClaimAudit | null>(null);
   const [feedback, setFeedback] = useState<ReportFeedbackSnapshot | null>(null);
   const [reportVerdict, setReportVerdict] = useState<ReportFeedbackVerdict | "">("");
   const [privateText, setPrivateText] = useState("");
@@ -72,7 +66,6 @@ export default function ReportDetailPage() {
   const [savingFeedback, setSavingFeedback] = useState<string | null>(null);
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
-  const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
     scopeRef.current = sessionScope;
@@ -86,15 +79,17 @@ export default function ReportDetailPage() {
     // locally generated report, which is how another account's data (or a fake
     // report) could be rendered as if it were real.
     (async () => {
-      const [backendReport, audit, currentFeedback] = await Promise.all([
+      const [backendReport, audit, claims, currentFeedback] = await Promise.all([
         fetchBackendReport(id),
         fetchReportSourceAudit(id),
+        fetchReportClaimAudit(id),
         fetchReportFeedback(id),
       ]);
       if (cancelled) return;
       if (backendReport) {
         setReport(backendReport);
         setSourceAudit(audit);
+        setClaimAudit(claims);
         setFeedback(currentFeedback);
         setReportVerdict(currentFeedback?.report?.verdict ?? "");
         setPrivateText(currentFeedback?.report?.privateText ?? "");
@@ -103,6 +98,7 @@ export default function ReportDetailPage() {
       } else {
         setReport(null);
         setSourceAudit(null);
+        setClaimAudit(null);
         setFeedback(null);
         setReportVerdict("");
         setPrivateText("");
@@ -112,10 +108,8 @@ export default function ReportDetailPage() {
         setState("missing");
       }
     })();
-    const t = setTimeout(() => setChartReady(true), 160);
     return () => {
       cancelled = true;
-      clearTimeout(t);
     };
   }, [id, sessionScope, sessionStatus]);
 
@@ -197,13 +191,20 @@ export default function ReportDetailPage() {
   const isLlm = mode.startsWith("llm");
   const modeLabel =
     mode === "llm-summary" ? "LLM-SUMMARY" : mode === "llm-assisted" ? "LLM-ASSISTED" : "DETERMINISTIC";
-  const llmAgentSet =
-    mode === "llm-summary" ? SUMMARY_LLM_AGENTS : mode === "llm-assisted" ? LLM_AGENTS : EMPTY_SET;
+  const zeroClaims = hasZeroAcceptedAnalyticalOutput(report, claimAudit);
+  const emptyAnalyticalProjection = hasEmptyAnalyticalProjection(report);
+  const decisionCounts = claimDecisionCounts(claimAudit);
   const bindingByCitation = new Map(
     (sourceAudit?.evidenceBindings ?? []).map((binding) => [binding.citationId, binding]),
   );
 
-  const metricCards = [
+  const metricCards = zeroClaims ? [
+    { k: "Frozen versions", v: String(sourceAudit?.sourceVersionCount ?? 0), s: "report-local corpus", accent: false },
+    { k: "Evidence sections", v: String(sourceAudit?.evidenceSectionCount ?? 0), s: "selected for analysis", accent: false },
+    { k: "Source bindings", v: String(sourceAudit?.evidenceBindings.length ?? 0), s: "frozen citations available", accent: false },
+    { k: "Accepted claims", v: "0", s: "deterministic support gate", accent: false },
+    { k: "Analytical confidence", v: "N/A", s: "No accepted claims to score", accent: false },
+  ] : [
     {
       k: "Documents",
       v: String(metrics.documentsAnalyzed),
@@ -213,22 +214,23 @@ export default function ReportDetailPage() {
           : "corpus unavailable",
       accent: false,
     },
-    { k: "Passages indexed", v: metrics.passagesIndexed.toLocaleString(), s: "semantic chunks", accent: false },
     { k: "Citations", v: String(metrics.citationsUsed), s: "source-traced", accent: false },
     { k: "Risks flagged", v: String(metrics.risksFlagged), s: severityBreakdown(report), accent: false },
-    { k: "Confidence", v: `${report.confidence}%`, s: "grounding score", accent: true },
+    emptyAnalyticalProjection
+      ? { k: "Analytical confidence", v: "N/A", s: "No analytical output to score", accent: false }
+      : { k: "Baseline score", v: `${report.confidence}%`, s: "document-count heuristic", accent: false },
   ];
 
   return (
-    <AppShell active="reports">
+    <AppShell active="reports" compactOnMobile>
       {/* header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px", height: 60, background: "var(--paper)", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, zIndex: 5 }}>
+      <div className="ev-report-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px", minHeight: 60, background: "var(--paper)", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, zIndex: 5 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
           <button onClick={() => router.push("/reports")} style={{ background: "transparent", border: "none", cursor: "pointer", font: "inherit", fontWeight: 700, fontSize: 14.5, color: "var(--ink)" }}>Reports</button>
           <span style={{ color: "var(--line2)" }}>/</span>
           <span style={{ fontSize: 13.5, color: "var(--sub)" }}>{report.company} · {report.market}</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="ev-report-actions" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button onClick={() => router.push("/workspace")} style={{ fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--line2)", padding: "8px 15px", borderRadius: 8, cursor: "pointer" }}>
             New report
           </button>
@@ -240,7 +242,7 @@ export default function ReportDetailPage() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1240, width: "100%", margin: "0 auto", padding: "32px 40px 64px" }}>
+      <div className="ev-report-content" style={{ maxWidth: zeroClaims ? 1040 : 1240, width: "100%", margin: "0 auto", padding: "32px 40px 64px" }}>
         {/* title block */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 26 }}>
           <div>
@@ -277,12 +279,18 @@ export default function ReportDetailPage() {
           </div>
           <div style={{ fontFamily: mono, fontSize: 11.5, color: "var(--sub)", textAlign: "right", lineHeight: 1.7 }}>
             <div>GENERATED {formatStamp(report.generatedAt)}</div>
-            <div>7 AGENTS · {metrics.documentsAnalyzed} DOCS · CONFIDENCE {report.confidence}%</div>
+            <div>
+              {zeroClaims
+                ? `${sourceAudit?.sourceVersionCount ?? 0} FROZEN VERSION${sourceAudit?.sourceVersionCount === 1 ? "" : "S"} · ANALYSIS COMPLETED`
+                : emptyAnalyticalProjection
+                  ? `${metrics.documentsAnalyzed} DOCS · NO ANALYTICAL OUTPUT TO SCORE`
+                  : `${metrics.documentsAnalyzed} DOCS · BASELINE SCORE ${report.confidence}%`}
+            </div>
           </div>
         </div>
 
         {/* metric cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 1, background: "var(--line)", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", marginBottom: 28 }} className="ev-metric-grid">
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${metricCards.length},1fr)`, gap: 1, background: "var(--line)", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", marginBottom: 28 }} className="ev-metric-grid">
           {metricCards.map((m) => (
             <div key={m.k} style={{ padding: "20px 20px", background: "var(--panel)" }}>
               <div style={{ fontFamily: mono, fontSize: 10.5, color: "var(--sub)", letterSpacing: ".06em", textTransform: "uppercase" }}>{m.k}</div>
@@ -292,21 +300,38 @@ export default function ReportDetailPage() {
           ))}
         </div>
 
-        {/* executive summary */}
-        <div style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12, padding: "22px 26px", marginBottom: 28 }}>
+        {/* executive status / summary */}
+        <div style={{ background: zeroClaims ? "var(--accent-weak)" : "var(--panel)", border: "1px solid var(--line)", borderRadius: 12, padding: "22px 26px", marginBottom: 28 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>EXECUTIVE SUMMARY</span>
+            <span style={{ fontFamily: mono, fontSize: 11, color: zeroClaims ? "var(--accent)" : "var(--sub)", letterSpacing: ".08em" }}>
+              {zeroClaims ? "NO SUPPORTED ANALYTICAL OUTPUT" : "EXECUTIVE SUMMARY"}
+            </span>
             <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
           </div>
+          {zeroClaims && (
+            <h2 style={{ fontSize: 21, lineHeight: 1.3, letterSpacing: "-.01em", margin: "0 0 8px" }}>
+              No claims were sufficiently supported
+            </h2>
+          )}
           <p style={{ fontSize: 15, lineHeight: 1.62, color: "var(--ink2)", margin: 0 }}>{report.summary}</p>
+          {zeroClaims && (
+            <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--sub)", margin: "10px 0 0" }}>
+              The pipeline completed successfully and analyzed the frozen evidence. No candidate passed the deterministic support gate; rejected and insufficient candidates remain audit-only ({decisionCounts.rejected} rejected, {decisionCounts.insufficient} insufficient).
+            </p>
+          )}
         </div>
 
-        {/* two-column body */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 28, alignItems: "start" }} className="ev-report-grid">
+        {/* analytical body; zero-claim reports deliberately collapse to one column */}
+        <div style={{ display: "grid", gridTemplateColumns: zeroClaims ? "1fr" : "1fr 380px", gap: 28, alignItems: "start" }} className="ev-report-grid">
           {/* LEFT */}
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
             <Card>
-              <SectionLabel>PERSONA BRIEF</SectionLabel>
+              <SectionLabel>{zeroClaims ? "CONFIGURED PERSONA CONTEXT" : "PERSONA BRIEF"}</SectionLabel>
+              {zeroClaims && (
+                <p style={{ fontSize: 12.5, color: "var(--sub)", lineHeight: 1.55, margin: "0 0 12px" }}>
+                  User-selected configuration used to scope the analysis; this is not an evidence-derived finding.
+                </p>
+              )}
               <p style={{ fontSize: 16, lineHeight: 1.62, color: "var(--ink2)", margin: 0 }}>{personaBrief.description}</p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 20 }}>
                 {personaBrief.priorities.map((p) => (
@@ -315,38 +340,31 @@ export default function ReportDetailPage() {
               </div>
             </Card>
 
-            <Card>
+            {report.workflowSteps.length > 0 && <Card>
               <SectionLabel>RECOMMENDED WORKFLOW</SectionLabel>
-              {report.workflowSteps.length === 0 ? (
-                <EmptyRow text="No workflow steps could be grounded in the selected documents." />
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column" }}>
-                  {report.workflowSteps.map((s, i) => (
-                    <div key={s.step} style={{ display: "flex", gap: 15, alignItems: "flex-start", padding: "15px 0", borderBottom: i < report.workflowSteps.length - 1 ? "1px solid var(--line)" : "none" }}>
-                      <div style={{ width: 26, height: 26, flex: "none", borderRadius: "50%", border: "1px solid var(--line2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
-                        {String(s.step).padStart(2, "0")}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)" }}>{s.title}</div>
-                        <div style={{ fontSize: 13, color: "var(--sub)", marginTop: 3, lineHeight: 1.5 }}>{s.description}</div>
-                      </div>
-                      <EvidenceChip code={s.evidenceCode} />
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {report.workflowSteps.map((s, i) => (
+                  <div key={s.step} style={{ display: "flex", gap: 15, alignItems: "flex-start", padding: "15px 0", borderBottom: i < report.workflowSteps.length - 1 ? "1px solid var(--line)" : "none" }}>
+                    <div style={{ width: 26, height: 26, flex: "none", borderRadius: "50%", border: "1px solid var(--line2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
+                      {String(s.step).padStart(2, "0")}
                     </div>
-                  ))}
-                </div>
-              )}
-            </Card>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)" }}>{s.title}</div>
+                      <div style={{ fontSize: 13, color: "var(--sub)", marginTop: 3, lineHeight: 1.5 }}>{s.description}</div>
+                    </div>
+                    <EvidenceChip code={s.evidenceCode} />
+                  </div>
+                ))}
+              </div>
+            </Card>}
 
-            <Card>
+            {report.risks.length > 0 && <Card>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
                 <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>RISKS &amp; WARNINGS</span>
                 <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{report.risks.length} flagged</span>
               </div>
-              {report.risks.length === 0 ? (
-                <EmptyRow text="No risks met the evidence-support threshold for this corpus." />
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {report.risks.map((r, riskIndex) => {
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {report.risks.map((r, riskIndex) => {
                     const color = SEV_COLORS[r.severity] ?? SEV_COLORS.Low;
                     const insufficient = isInsufficient(r.evidenceCode);
                     const itemPath = `/risks/${riskIndex}`;
@@ -377,47 +395,13 @@ export default function ReportDetailPage() {
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-              )}
-            </Card>
+                })}
+              </div>
+            </Card>}
           </div>
 
           {/* RIGHT */}
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-            <Card pad="24px 24px">
-              <SectionLabel>AGENT TIMELINE</SectionLabel>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {report.agentSteps.map((t) => (
-                  <div key={t.agent} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", flex: "none" }} />
-                    <span style={{ fontSize: 13, color: "var(--ink)", flex: 1 }}>{t.agent}</span>
-                    {llmAgentSet.has(t.agent) && (
-                      <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, letterSpacing: ".05em", color: "#fff", background: "var(--accent)", padding: "2px 6px", borderRadius: 4 }}>LLM</span>
-                    )}
-                    <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{t.duration}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-
-            <Card pad="24px 24px">
-              <SectionLabel>DOCUMENT RELEVANCE</SectionLabel>
-              <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
-                {metrics.documentRelevance.map((d) => (
-                  <div key={d.document}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 12.5, color: "var(--ink)" }}>{d.document}</span>
-                      <span style={{ fontFamily: mono, fontSize: 11.5, color: "var(--sub)" }}>{d.score}%</span>
-                    </div>
-                    <div style={{ height: 7, background: "var(--shell)", borderRadius: 4, overflow: "hidden" }}>
-                      <div style={{ width: `${chartReady ? d.score : 0}%`, height: "100%", background: d.score >= 85 ? "var(--accent)" : "#0a0a0b", borderRadius: 4, transition: "width .8s cubic-bezier(.22,1,.36,1)" }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-
             <Card pad="24px 24px">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                 <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)", letterSpacing: ".08em" }}>CITATIONS</span>
@@ -426,30 +410,18 @@ export default function ReportDetailPage() {
               {report.citations.length === 0 ? (
                 <EmptyRow text="No source citations were bound for this report." />
               ) : (
-                <div style={{ display: "flex", flexDirection: "column" }}>
+                <div className={zeroClaims ? "ev-citation-grid" : undefined} style={{ display: "grid", gridTemplateColumns: zeroClaims ? "repeat(2, minmax(0, 1fr))" : "1fr", gap: zeroClaims ? 14 : 0 }}>
                   {report.citations.map((c, i) => (
-                    <div key={c.id + i} style={{ display: "flex", gap: 12, padding: "13px 0", borderBottom: i < report.citations.length - 1 ? "1px solid var(--line)" : "none" }}>
-                      <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{c.id}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{c.source}</div>
-                        {c.section && (
-                          <div style={{ fontFamily: mono, fontSize: 10.5, color: "var(--sub)", marginTop: 2 }}>{c.section}</div>
-                        )}
-                        {bindingByCitation.get(c.id) && (
-                          <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", marginTop: 3 }}>
-                            VERSION {bindingByCitation.get(c.id)!.documentVersionId} · SECTION {bindingByCitation.get(c.id)!.sectionOrdinal + 1}
-                          </div>
-                        )}
-                        <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.5, fontStyle: "italic" }}>&ldquo;{c.excerpt}&rdquo;</div>
-                        <FeedbackChoices
-                          label={`Citation ${c.id} feedback`}
-                          choices={[["correct", "Correct"], ["irrelevant", "Irrelevant"]]}
-                          selected={feedback?.citations.find((item) => item.itemPath === `/citations/${i}` && item.citationId === c.id)?.verdict}
-                          disabled={savingFeedback === `/citations/${i}`}
-                          onChoose={(value) => void saveCitationVerdict(`/citations/${i}`, c.id, value as CitationFeedbackVerdict)}
-                        />
-                      </div>
-                    </div>
+                    <CitationCard
+                      key={c.id + i}
+                      citation={c}
+                      binding={bindingByCitation.get(c.id)}
+                      allowReportFallback={sourceAudit?.corpusMode === "demo"}
+                      bordered={zeroClaims || i < report.citations.length - 1}
+                      selected={feedback?.citations.find((item) => item.itemPath === `/citations/${i}` && item.citationId === c.id)?.verdict}
+                      disabled={savingFeedback === `/citations/${i}`}
+                      onChoose={(value) => void saveCitationVerdict(`/citations/${i}`, c.id, value)}
+                    />
                   ))}
                 </div>
               )}
@@ -470,7 +442,7 @@ export default function ReportDetailPage() {
               </Card>
             )}
 
-            <div style={{ background: "#0a0a0b", color: "#f5f5f3", borderRadius: 12, padding: "24px 24px" }}>
+            {!zeroClaims && report.suggestedActions.length > 0 && <div style={{ background: "#0a0a0b", color: "#f5f5f3", borderRadius: 12, padding: "24px 24px" }}>
               <div style={{ fontFamily: mono, fontSize: 11, color: "rgba(245,245,243,.5)", letterSpacing: ".08em", marginBottom: 18 }}>SUGGESTED ACTIONS</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
                 {report.suggestedActions.map((a) => (
@@ -486,7 +458,7 @@ export default function ReportDetailPage() {
               <button onClick={openPrint} style={{ width: "100%", marginTop: 18, fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: "#0a0a0b", background: "#fff", border: "none", padding: 12, borderRadius: 9, cursor: "pointer" }}>
                 Export full playbook →
               </button>
-            </div>
+            </div>}
           </div>
         </div>
 
@@ -532,9 +504,33 @@ export default function ReportDetailPage() {
             grid-template-columns: 1fr !important;
           }
         }
+        @media (max-width: 820px) {
+          .ev-citation-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
         @media (max-width: 760px) {
+          .ev-app-shell-compact-mobile > aside {
+            display: none !important;
+          }
           .ev-metric-grid {
             grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .ev-metric-grid > :last-child:nth-child(odd) {
+            grid-column: 1 / -1;
+          }
+          .ev-report-header {
+            position: static !important;
+            align-items: flex-start !important;
+            gap: 12px;
+            padding: 12px 16px !important;
+            flex-direction: column;
+          }
+          .ev-report-actions {
+            width: 100%;
+          }
+          .ev-report-content {
+            padding: 24px 16px 48px !important;
           }
         }
       `}</style>
@@ -547,6 +543,69 @@ function severityBreakdown(report: EvidentiaReport): string {
   const m = report.risks.filter((r) => r.severity === "Medium").length;
   const l = report.risks.filter((r) => r.severity === "Low").length;
   return `${h} high · ${m} med · ${l} low`;
+}
+
+function CitationCard({
+  citation,
+  binding,
+  allowReportFallback,
+  bordered,
+  selected,
+  disabled,
+  onChoose,
+}: {
+  citation: Citation;
+  binding?: ReportEvidenceSource;
+  allowReportFallback: boolean;
+  bordered: boolean;
+  selected?: string;
+  disabled?: boolean;
+  onChoose: (value: CitationFeedbackVerdict) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const excerpt = binding?.excerpt ?? (allowReportFallback ? citation.excerpt : "Frozen source binding unavailable for this citation.");
+  const previewLimit = 320;
+  const hasMore = excerpt.length > previewLimit;
+  const shownExcerpt = hasMore && !expanded ? `${excerpt.slice(0, previewLimit).trimEnd()}…` : excerpt;
+  const title = binding?.documentTitle || binding?.originalFilename || citation.source;
+  const sectionPath = binding?.headingPath.length
+    ? binding.headingPath.join(" / ")
+    : binding?.sectionTitle || citation.section;
+
+  return (
+    <div style={{ display: "flex", gap: 12, minWidth: 0, padding: 13, border: bordered ? "1px solid var(--line)" : "none", borderRadius: bordered ? 9 : 0, overflowWrap: "anywhere" }}>
+      <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{binding?.citationId || citation.id}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{title}</div>
+        {sectionPath && (
+          <div style={{ fontFamily: mono, fontSize: 10.5, color: "var(--sub)", marginTop: 2 }}>{sectionPath}</div>
+        )}
+        {binding && (
+          <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", marginTop: 3 }}>
+            VERSION {binding.documentVersionId} · SECTION {binding.sectionOrdinal + 1}
+          </div>
+        )}
+        <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 6, lineHeight: 1.55, fontStyle: "italic", whiteSpace: "pre-wrap" }}>&ldquo;{shownExcerpt}&rdquo;</div>
+        {hasMore && (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+            style={{ border: 0, padding: 0, marginTop: 7, background: "transparent", color: "var(--accent)", font: "inherit", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
+          >
+            {expanded ? "Show less" : "Show more"}
+          </button>
+        )}
+        <FeedbackChoices
+          label={`Citation ${citation.id} feedback`}
+          choices={[["correct", "Correct"], ["irrelevant", "Irrelevant"]]}
+          selected={selected}
+          disabled={disabled}
+          onChoose={(value) => onChoose(value as CitationFeedbackVerdict)}
+        />
+      </div>
+    </div>
+  );
 }
 
 function EvidenceChip({ code, small }: { code: string; small?: boolean }) {

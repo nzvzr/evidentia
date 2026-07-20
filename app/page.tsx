@@ -155,10 +155,10 @@ export default function LandingPage() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "rgba(255,255,255,.08)", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
             {[
-              { k: "DOCUMENTS", v: "8", accent: false },
-              { k: "CITATIONS", v: "26", accent: false },
-              { k: "RISKS", v: "4", accent: false },
-              { k: "CONFIDENCE", v: "92%", accent: true },
+              { k: "PERSONA", v: "Role-specific", accent: false },
+              { k: "MARKET", v: "Localized", accent: false },
+              { k: "OUTPUT", v: "Playbook", accent: false },
+              { k: "EVIDENCE", v: "Cited", accent: true },
             ].map((m) => (
               <div key={m.k} style={{ padding: "18px 20px", background: "#0e0e10" }}>
                 <div style={{ fontFamily: mono, fontSize: 10.5, color: "rgba(245,245,243,.42)", letterSpacing: ".08em" }}>{m.k}</div>
@@ -168,35 +168,30 @@ export default function LandingPage() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 1, background: "rgba(255,255,255,.08)" }}>
             <div style={{ padding: "22px 24px", background: "#0e0e10" }}>
-              <div style={{ fontFamily: mono, fontSize: 10.5, color: "rgba(245,245,243,.42)", letterSpacing: ".08em", marginBottom: 16 }}>AGENT TIMELINE</div>
+              <div style={{ fontFamily: mono, fontSize: 10.5, color: "rgba(245,245,243,.42)", letterSpacing: ".08em", marginBottom: 16 }}>PLAYBOOK CONTENTS</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
                 {[
-                  ["Persona Modeler", "0.4s"],
-                  ["Semantic Retrieval", "1.1s"],
-                  ["Risk Analyzer", "0.9s"],
-                ].map(([name, dur]) => (
+                  "Configured persona context",
+                  "Evidence-backed workflow",
+                  "Frozen source appendix",
+                ].map((name) => (
                   <div key={name} style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)" }} />
                     <span style={{ fontSize: 13, color: "rgba(245,245,243,.85)" }}>{name}</span>
-                    <span style={{ flex: 1, height: 1, background: "rgba(255,255,255,.08)" }} />
-                    <span style={{ fontFamily: mono, fontSize: 11, color: "rgba(245,245,243,.4)" }}>{dur}</span>
                   </div>
                 ))}
               </div>
             </div>
             <div style={{ padding: "22px 24px", background: "#0e0e10" }}>
-              <div style={{ fontFamily: mono, fontSize: 10.5, color: "rgba(245,245,243,.42)", letterSpacing: ".08em", marginBottom: 16 }}>DOC RELEVANCE</div>
+              <div style={{ fontFamily: mono, fontSize: 10.5, color: "rgba(245,245,243,.42)", letterSpacing: ".08em", marginBottom: 16 }}>PROVENANCE</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
                 {[
-                  ["Deployment Guide", 94, "var(--accent)"],
-                  ["API Reference", 82, "#fff"],
-                  ["Residency Policy", 71, "#fff"],
-                ].map(([label, pct, color]) => (
-                  <div key={label as string}>
-                    <div style={{ fontSize: 11, color: "rgba(245,245,243,.6)", marginBottom: 5 }}>{label}</div>
-                    <div style={{ height: 6, background: "rgba(255,255,255,.08)", borderRadius: 3 }}>
-                      <div style={{ width: `${pct}%`, height: "100%", background: color as string, borderRadius: 3 }} />
-                    </div>
+                  "Document version",
+                  "Section path",
+                  "Evidence excerpt",
+                ].map((label) => (
+                  <div key={label}>
+                    <div style={{ fontSize: 11, color: "rgba(245,245,243,.6)" }}>{label}</div>
                   </div>
                 ))}
               </div>

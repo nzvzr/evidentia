@@ -4,6 +4,7 @@ import type {
   CitationFeedbackVerdict,
   EvidentiaReport,
   ItemFeedbackVerdict,
+  ReportClaimAudit,
   ReportFeedbackSnapshot,
   ReportFeedbackVerdict,
   ReportSourceAudit,
@@ -45,6 +46,19 @@ export async function fetchReportSourceAudit(id: string): Promise<ReportSourceAu
     if (!res.ok) return null;
     const data = (await res.json()) as ReportSourceAudit;
     return data && Array.isArray(data.evidenceBindings) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchReportClaimAudit(id: string): Promise<ReportClaimAudit | null> {
+  try {
+    const res = await fetch(`/api/reports/${encodeURIComponent(id)}/claims`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as ReportClaimAudit;
+    return data && Array.isArray(data.candidates) ? data : null;
   } catch {
     return null;
   }

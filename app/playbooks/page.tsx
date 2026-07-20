@@ -4,8 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { PLAYBOOK_TEMPLATES } from "@/lib/scenarios";
-import { fetchBackendReports } from "@/lib/reportsApi";
-import type { EvidentiaReport } from "@/lib/types";
+import { fetchBackendReports, fetchReportClaimAudit } from "@/lib/reportsApi";
+import { hasZeroAcceptedAnalyticalOutput } from "@/lib/reportPresentation";
+import type { EvidentiaReport, ReportClaimAudit } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -16,12 +17,12 @@ interface PlaybookCard {
   persona: string;
   market: string;
   generatedDate: string;
-  confidence: number;
+  confidence: string;
   risks: number;
   citations: number;
 }
 
-function toCard(r: EvidentiaReport): PlaybookCard {
+function toCard(r: EvidentiaReport, audit: ReportClaimAudit | null | undefined): PlaybookCard {
   const d = new Date(r.generatedAt);
   const date = Number.isNaN(d.getTime())
     ? "—"
@@ -33,7 +34,7 @@ function toCard(r: EvidentiaReport): PlaybookCard {
     persona: r.persona,
     market: r.market,
     generatedDate: date,
-    confidence: r.confidence,
+    confidence: audit == null ? "—" : hasZeroAcceptedAnalyticalOutput(r, audit) ? "N/A" : `${r.confidence}%`,
     risks: r.metrics.risksFlagged,
     citations: r.metrics.citationsUsed,
   };
@@ -42,14 +43,18 @@ function toCard(r: EvidentiaReport): PlaybookCard {
 export default function PlaybooksPage() {
   const router = useRouter();
   const [stored, setStored] = useState<EvidentiaReport[]>([]);
+  const [claimAudits, setClaimAudits] = useState<Record<string, ReportClaimAudit | null>>({});
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     // Tenant reports come from the backend only — never from a browser cache.
     let cancelled = false;
     fetchBackendReports()
-      .then((reports) => {
-        if (!cancelled) setStored(reports);
+      .then(async (reports) => {
+        if (cancelled) return;
+        setStored(reports);
+        const audits = await Promise.all(reports.map(async (report) => [report.id, await fetchReportClaimAudit(report.id)] as const));
+        if (!cancelled) setClaimAudits(Object.fromEntries(audits));
       })
       .finally(() => {
         if (!cancelled) setHydrated(true);
@@ -62,7 +67,10 @@ export default function PlaybooksPage() {
   const openReport = (rec: PlaybookCard) => router.push(`/reports/${rec.id}`);
   const openPrint = (rec: PlaybookCard) => window.open(`/playbook/${rec.id}/print`, "_blank");
 
-  const recents: PlaybookCard[] = useMemo(() => stored.map(toCard), [stored]);
+  const recents: PlaybookCard[] = useMemo(
+    () => stored.map((report) => toCard(report, claimAudits[report.id])),
+    [stored, claimAudits],
+  );
 
   return (
     <AppShell active="playbooks">
@@ -119,7 +127,7 @@ export default function PlaybooksPage() {
                   <Meta label="PERSONA" value={rec.persona} />
                   <Meta label="MARKET" value={rec.market} />
                   <Meta label="GENERATED" value={rec.generatedDate} monoValue />
-                  <Meta label="CONFIDENCE" value={`${rec.confidence}%`} accent />
+                  <Meta label="BASELINE SCORE" value={rec.confidence} />
                 </div>
 
                 <div style={{ display: "flex", gap: 16, marginTop: 14, fontFamily: mono, fontSize: 11.5, color: "var(--sub)" }}>

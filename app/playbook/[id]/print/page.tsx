@@ -3,8 +3,9 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Logo from "@/components/Logo";
-import { fetchBackendReport } from "@/lib/reportsApi";
-import type { EvidentiaReport, RiskItem } from "@/lib/types";
+import { fetchBackendReport, fetchReportClaimAudit, fetchReportSourceAudit } from "@/lib/reportsApi";
+import { claimDecisionCounts, hasZeroAcceptedAnalyticalOutput } from "@/lib/reportPresentation";
+import type { EvidentiaReport, ReportClaimAudit, ReportSourceAudit, RiskItem } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -27,36 +28,30 @@ function formatStamp(iso: string): string {
   return `${mon} ${day} ${d.getUTCFullYear()} · ${hh}:${mm} UTC`;
 }
 
-function nextReviewDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  d.setUTCDate(d.getUTCDate() + 30);
-  const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
-  return `${mon} ${String(d.getUTCDate()).padStart(2, "0")} ${d.getUTCFullYear()}`;
-}
-
-function complianceLevel(v: EvidentiaReport["metrics"]["complianceSensitivity"]): { level: number; color: string } {
-  if (v === "High") return { level: 3, color: SEV_COLORS.High };
-  if (v === "Moderate") return { level: 2, color: SEV_COLORS.Medium };
-  return { level: 1, color: "var(--accent)" };
-}
-
 export default function PrintPlaybookPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = (Array.isArray(params.id) ? params.id[0] : params.id) || "current";
 
   const [report, setReport] = useState<EvidentiaReport | null>(null);
+  const [sourceAudit, setSourceAudit] = useState<ReportSourceAudit | null>(null);
+  const [claimAudit, setClaimAudit] = useState<ReportClaimAudit | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const backendReport = await fetchBackendReport(id);
+      const [backendReport, audit, claims] = await Promise.all([
+        fetchBackendReport(id),
+        fetchReportSourceAudit(id),
+        fetchReportClaimAudit(id),
+      ]);
       if (cancelled) return;
       // Backend only. Never fall back to a cached/generated report: printing a
       // fabricated or another tenant's report as an official playbook is worse
       // than printing nothing.
       setReport(backendReport);
+      setSourceAudit(audit);
+      setClaimAudit(claims);
     })();
     try {
       window.scrollTo(0, 0);
@@ -83,21 +78,22 @@ export default function PrintPlaybookPage() {
   }
 
   const { metrics } = report;
+  const zeroClaims = hasZeroAcceptedAnalyticalOutput(report, claimAudit);
+  const allowReportCitationFallback = sourceAudit?.corpusMode === "demo";
   const mode = report.generationMode ?? "deterministic";
   const counts = {
     High: report.risks.filter((r) => r.severity === "High").length,
     Medium: report.risks.filter((r) => r.severity === "Medium").length,
     Low: report.risks.filter((r) => r.severity === "Low").length,
   };
-  const totalRisks = report.risks.length || 1;
-  const cs = complianceLevel(metrics.complianceSensitivity);
+  const totalRisks = report.risks.length;
 
   const metricCards = [
     { k: "DOCUMENTS", v: String(metrics.documentsAnalyzed), accent: false },
-    { k: "PASSAGES", v: metrics.passagesIndexed.toLocaleString(), accent: false },
     { k: "CITATIONS", v: String(metrics.citationsUsed), accent: false },
     { k: "RISKS", v: String(metrics.risksFlagged), accent: false },
-    { k: "CONFIDENCE", v: `${report.confidence}%`, accent: true },
+    { k: "WORKFLOW STEPS", v: String(report.workflowSteps.length), accent: false },
+    { k: "BASELINE SCORE", v: `${report.confidence}%`, accent: false },
   ];
 
   return (
@@ -116,6 +112,13 @@ export default function PrintPlaybookPage() {
       </div>
 
       <div className="print-shell">
+        {zeroClaims ? (
+          <ZeroClaimPrint
+            report={report}
+            sourceAudit={sourceAudit}
+            counts={claimDecisionCounts(claimAudit)}
+          />
+        ) : <>
         {/* ===== PAGE 1 · COVER / EXECUTIVE SUMMARY ===== */}
         <section className="print-page">
           <div className="page-content">
@@ -135,8 +138,8 @@ export default function PrintPlaybookPage() {
               <MetaCell label="PERSONA" value={report.persona} />
               <MetaCell label="GENERATED" value={formatStamp(report.generatedAt)} mono />
               <div style={{ padding: "15px 16px" }}>
-                <div style={metaLabel}>CONFIDENCE</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: "var(--accent)", marginTop: 3, letterSpacing: "-.02em" }}>{report.confidence}%</div>
+                <div style={metaLabel}>BASELINE SCORE</div>
+                <div style={{ fontSize: 22, fontWeight: 700, marginTop: 3, letterSpacing: "-.02em" }}>{report.confidence}%</div>
               </div>
             </div>
 
@@ -150,7 +153,7 @@ export default function PrintPlaybookPage() {
               <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)", marginTop: 7, lineHeight: 1.5 }}>{report.topFinding}</div>
             </div>
 
-            <div style={{ marginTop: 32 }}>
+            {report.suggestedActions.length > 0 && <div style={{ marginTop: 32 }}>
               <SectionTitle>02 · TOP RECOMMENDATIONS</SectionTitle>
               {report.suggestedActions.slice(0, 3).map((a, i) => (
                 <div key={a.title} style={{ display: "flex", gap: 16, padding: "15px 0", borderBottom: i < 2 ? "1px solid var(--line)" : "none" }}>
@@ -161,7 +164,7 @@ export default function PrintPlaybookPage() {
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
 
             <PageFooter report={report} section="EXECUTIVE SUMMARY" />
           </div>
@@ -172,7 +175,7 @@ export default function PrintPlaybookPage() {
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
-              <SectionTitle mb={22}>INSIGHT DASHBOARD</SectionTitle>
+              <SectionTitle mb={22}>ANALYSIS FACTS</SectionTitle>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", border: "1px solid var(--line2)", borderRadius: 9, overflow: "hidden", marginBottom: 22 }}>
                 {metricCards.map((m) => (
@@ -183,22 +186,13 @@ export default function PrintPlaybookPage() {
                 ))}
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, gridAutoRows: "1fr" }}>
-                <InsightCard title="Document Relevance">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-                    {metrics.documentRelevance.map((d) => (
-                      <div key={d.document}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                          <span style={{ fontSize: 12, color: "var(--ink)" }}>{d.document}</span>
-                          <span style={{ fontFamily: mono, fontSize: 11, color: "var(--sub)" }}>{d.score}%</span>
-                        </div>
-                        <Bar pct={d.score} />
-                      </div>
-                    ))}
-                  </div>
+              <div style={{ display: "grid", gridTemplateColumns: totalRisks > 0 ? "1fr 1fr" : "1fr", gap: 18 }}>
+                <InsightCard title="Configured persona context">
+                  <p style={{ fontSize: 12, color: "var(--sub)", lineHeight: 1.5, margin: "0 0 8px" }}>User-selected configuration, not an evidence-derived finding.</p>
+                  <p style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.6, margin: 0 }}>{report.personaBrief.description}</p>
                 </InsightCard>
 
-                <InsightCard title="Risk Severity Breakdown">
+                {totalRisks > 0 && <InsightCard title="Risk Severity Breakdown">
                   <div style={{ height: 14, borderRadius: 4, overflow: "hidden", display: "flex" }}>
                     <div style={{ width: `${(counts.High / totalRisks) * 100}%`, background: SEV_COLORS.High }} />
                     <div style={{ width: `${(counts.Medium / totalRisks) * 100}%`, background: SEV_COLORS.Medium }} />
@@ -214,30 +208,17 @@ export default function PrintPlaybookPage() {
                     ))}
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--sub)", marginTop: "auto", paddingTop: 16, lineHeight: 1.5 }}>
-                    {totalRisks} risks flagged across the analyzed corpus, weighted by regulatory and operational impact.
+                    {totalRisks} persisted risks in this report.
                   </div>
-                </InsightCard>
-
-                <StatCard title="Citation Coverage" big={`${metrics.citationCoverage}%`} pct={metrics.citationCoverage} sub={`${metrics.citationsUsed} sources across ${metrics.documentsAnalyzed} documents`} />
-                <StatCard title="Workflow Completeness" big={`${metrics.workflowCompleteness}%`} pct={metrics.workflowCompleteness} sub={`${report.agentSteps.length} of ${report.agentSteps.length} agents complete · ${report.workflowSteps.length} steps mapped`} />
-                <StatCard title="Persona Relevance Score" big={`${metrics.personaRelevanceScore}%`} pct={metrics.personaRelevanceScore} sub={`Corpus match to the ${report.persona} profile`} />
-
-                <InsightCard title="Compliance Sensitivity">
-                  <div style={{ fontSize: 30, fontWeight: 700, color: cs.color, letterSpacing: "-.02em" }}>{metrics.complianceSensitivity}</div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} style={{ flex: 1, height: 9, borderRadius: 2, background: i <= cs.level ? cs.color : "var(--line)" }} />
-                    ))}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--sub)", marginTop: 14 }}>{report.market} market · {report.persona} lens</div>
-                </InsightCard>
+                </InsightCard>}
               </div>
             </div>
-            <PageFooter report={report} section="INSIGHT DASHBOARD" />
+            <PageFooter report={report} section="ANALYSIS FACTS" />
           </div>
         </section>
 
         {/* ===== PAGE 3 · RECOMMENDED WORKFLOW ===== */}
+        {report.workflowSteps.length > 0 && (
         <section className="print-page print-flow">
           <div className="page-content">
             <PageHeader report={report} />
@@ -274,8 +255,10 @@ export default function PrintPlaybookPage() {
             <PageFooter report={report} section="RECOMMENDED WORKFLOW" />
           </div>
         </section>
+        )}
 
         {/* ===== PAGE 4 · RISK REGISTER & EVIDENCE ===== */}
+        {report.risks.length > 0 && (
         <section className="print-page print-flow">
           <div className="page-content">
             <PageHeader report={report} />
@@ -315,6 +298,7 @@ export default function PrintPlaybookPage() {
             <PageFooter report={report} section="RISK REGISTER" />
           </div>
         </section>
+        )}
 
         {/* ===== PAGE 5 · SOURCE APPENDIX ===== */}
         <section className="print-page print-flow">
@@ -325,45 +309,42 @@ export default function PrintPlaybookPage() {
               <div style={{ fontSize: 13.5, color: "var(--sub)", margin: "14px 0 4px", lineHeight: 1.5 }}>
                 Every claim in this playbook is traceable to a source span in the analyzed corpus.
               </div>
-              {report.citations.map((c, i) => (
-                <div key={c.id + i} className="avoid-break" style={{ display: "flex", gap: 14, padding: "14px 0", borderBottom: i < report.citations.length - 1 ? "1px solid var(--line)" : "none" }}>
-                  <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{c.id}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{c.source}</div>
-                    <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.55, fontStyle: "italic" }}>&ldquo;{c.excerpt}&rdquo;</div>
-                    <div style={{ ...fieldLabel, marginTop: 8 }}>WHY THIS CITATION MATTERS</div>
-                    <div style={{ fontSize: 12, color: "var(--sub)", marginTop: 4, lineHeight: 1.5 }}>{c.whyItMatters}</div>
+              {report.citations.map((c, i) => {
+                const binding = sourceAudit?.evidenceBindings.find((item) => item.citationId === c.id);
+                return (
+                  <div key={c.id + i} className="avoid-break" style={{ display: "flex", gap: 14, padding: "14px 0", borderBottom: i < report.citations.length - 1 ? "1px solid var(--line)" : "none", overflowWrap: "anywhere" }}>
+                    <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, color: "#fff", background: "#0a0a0b", padding: "3px 7px", borderRadius: 5, flex: "none", alignSelf: "flex-start", whiteSpace: "nowrap" }}>{binding?.citationId || c.id}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{binding?.documentTitle || binding?.originalFilename || c.source}</div>
+                      {binding && <div style={{ ...fieldLabel, marginTop: 4 }}>VERSION {binding.documentVersionId} · {(binding.headingPath.join(" / ") || binding.sectionTitle)}</div>}
+                      <div style={{ fontSize: 12.5, color: "var(--ink2)", marginTop: 4, lineHeight: 1.55, fontStyle: "italic", whiteSpace: "pre-wrap" }}>&ldquo;{binding?.excerpt ?? (allowReportCitationFallback ? c.excerpt : "Frozen source binding unavailable for this citation.")}&rdquo;</div>
+                      <div style={{ ...fieldLabel, marginTop: 8 }}>WHY THIS CITATION MATTERS</div>
+                      <div style={{ fontSize: 12, color: "var(--sub)", marginTop: 4, lineHeight: 1.5 }}>{c.whyItMatters}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <PageFooter report={report} section="SOURCE APPENDIX" />
           </div>
         </section>
 
-        {/* ===== PAGE 6 · IMPLEMENTATION CHECKLIST ===== */}
+        {/* ===== PAGE 6 · PERSISTED ACTION CHECKLIST ===== */}
+        {(report.suggestedActions.length > 0 || report.workflowSteps.length > 0) && (
         <section className="print-page print-flow">
           <div className="page-content">
             <PageHeader report={report} />
             <div style={{ marginTop: 34 }}>
-              <SectionTitle mb={6}>IMPLEMENTATION CHECKLIST</SectionTitle>
+              <SectionTitle mb={6}>PERSISTED ACTION CHECKLIST</SectionTitle>
               <div style={{ fontSize: 13.5, color: "var(--sub)", margin: "14px 0 22px", lineHeight: 1.5 }}>
-                Turn this playbook into action. Track the items below through to your next review.
+                Only actions and workflow outputs recorded in the persisted report are included below.
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 22 }}>
-                <ChecklistBlock title="IMMEDIATE ACTIONS (0–7 DAYS)" items={report.suggestedActions.slice(0, 3).map((a) => a.title)} />
-                <ChecklistBlock
-                  title="FOLLOW-UP ACTIONS (2–4 WEEKS)"
-                  items={[
-                    "Close the highest-severity item in the risk register",
-                    "Re-run Evidentia after documentation updates",
-                    "Circulate the playbook to the review owner",
-                  ]}
-                />
-              </div>
+              {report.suggestedActions.length > 0 && (
+                <ChecklistBlock title="RECORDED ACTIONS" items={report.suggestedActions.map((a) => a.title)} />
+              )}
 
-              <div style={{ marginTop: 24 }}>
+              {report.workflowSteps.length > 0 && <div style={{ marginTop: 24 }}>
                 <div style={fieldLabel}>CHECKLIST ITEMS</div>
                 <div style={{ marginTop: 12 }}>
                   {report.workflowSteps.map((s) => (
@@ -376,28 +357,119 @@ export default function PrintPlaybookPage() {
                     </div>
                   ))}
                 </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 26 }}>
-                <div style={{ padding: "16px 18px", border: "1px solid var(--line2)", borderRadius: 9 }}>
-                  <div style={fieldLabel}>REVIEW OWNER</div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", marginTop: 6 }}>{report.risks[0]?.owner ?? "Platform Eng"}</div>
-                </div>
-                <div style={{ padding: "16px 18px", border: "1px solid var(--line2)", borderRadius: 9 }}>
-                  <div style={fieldLabel}>NEXT REVIEW DATE</div>
-                  <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, color: "var(--ink)", marginTop: 8 }}>{nextReviewDate(report.generatedAt)}</div>
-                </div>
-              </div>
+              </div>}
             </div>
-            <PageFooter report={report} section="IMPLEMENTATION CHECKLIST" />
+            <PageFooter report={report} section="PERSISTED ACTION CHECKLIST" />
           </div>
         </section>
+        )}
+        </>}
       </div>
     </div>
   );
 }
 
 /* ---------------- helpers ---------------- */
+
+function ZeroClaimPrint({
+  report,
+  sourceAudit,
+  counts,
+}: {
+  report: EvidentiaReport;
+  sourceAudit: ReportSourceAudit | null;
+  counts: { accepted: number; rejected: number; insufficient: number };
+}) {
+  const mode = report.generationMode ?? "deterministic";
+  return (
+    <>
+      <section className="print-page print-flow">
+        <div className="page-content">
+          <PageHeader report={report} confidential showMeta={false} />
+          <div style={{ marginTop: 38 }}>
+            <div style={{ fontFamily: mono, fontSize: 11, color: "var(--accent)", letterSpacing: ".16em", textTransform: "uppercase" }}>Evidence analysis report</div>
+            <h1 style={{ fontSize: 42, fontWeight: 700, letterSpacing: "-.03em", lineHeight: 1.05, margin: "12px 0 0" }}>{report.persona}</h1>
+            <div style={{ fontSize: 15, color: "var(--sub)", marginTop: 10 }}>{report.company} — {report.market} market</div>
+            <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", letterSpacing: ".08em", marginTop: 8 }}>
+              GENERATION · {mode.toUpperCase()} · {formatStamp(report.generatedAt)} · TENANT CORPUS
+            </div>
+          </div>
+
+          <div style={{ marginTop: 30, padding: "22px 24px", border: "1px solid var(--line2)", borderRadius: 9, background: "var(--accent-weak)" }}>
+            <div style={{ ...fieldLabel, color: "var(--accent)" }}>EXECUTIVE STATUS</div>
+            <h2 style={{ fontSize: 23, margin: "8px 0", lineHeight: 1.25 }}>No claims were sufficiently supported</h2>
+            <p style={{ fontSize: 14, lineHeight: 1.65, color: "var(--ink2)", margin: 0 }}>{report.summary}</p>
+            <p style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--sub)", margin: "9px 0 0" }}>
+              The pipeline completed successfully and analyzed the frozen evidence. No candidate passed the deterministic support gate; rejected and insufficient candidates remain audit-only.
+            </p>
+          </div>
+
+          <div style={{ marginTop: 26 }}>
+            <SectionTitle>ANALYSIS FACTS</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", border: "1px solid var(--line2)", borderRadius: 9, overflow: "hidden" }}>
+              <MetaCell label="FROZEN VERSIONS" value={String(sourceAudit?.sourceVersionCount ?? 0)} />
+              <MetaCell label="SELECTED EVIDENCE SECTIONS" value={String(sourceAudit?.evidenceSectionCount ?? 0)} />
+              <MetaCell label="SOURCE BINDINGS" value={String(sourceAudit?.evidenceBindings.length ?? 0)} />
+              <MetaCell label="ACCEPTED CLAIMS" value="0" />
+              <MetaCell label="REJECTED CANDIDATES" value={String(counts.rejected)} />
+              <MetaCell label="INSUFFICIENT CANDIDATES" value={String(counts.insufficient)} />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 26 }}>
+            <SectionTitle>CONFIGURED PERSONA CONTEXT</SectionTitle>
+            <p style={{ fontSize: 12.5, color: "var(--sub)", lineHeight: 1.55, margin: "0 0 9px" }}>
+              User-selected configuration used to scope the analysis; this is not an evidence-derived finding.
+            </p>
+            <p style={{ fontSize: 14, color: "var(--ink2)", lineHeight: 1.65, margin: 0 }}>{report.personaBrief.description}</p>
+          </div>
+          <PageFooter report={report} section="EXECUTIVE STATUS" />
+        </div>
+      </section>
+
+      <section className="print-page print-flow">
+        <div className="page-content">
+          <PageHeader report={report} />
+          <div style={{ marginTop: 30 }}>
+            <SectionTitle>SOURCE APPENDIX</SectionTitle>
+            <p style={{ fontSize: 12.5, color: "var(--sub)", lineHeight: 1.55, margin: "0 0 10px" }}>
+              Frozen report-local evidence reviewed during generation. These excerpts are provenance records, not accepted analytical claims.
+            </p>
+            {(sourceAudit?.evidenceBindings ?? []).map((binding, index) => (
+              <div key={`${binding.citationId}-${binding.anchorId}-${index}`} className="avoid-break" style={{ padding: "14px 0", borderBottom: "1px solid var(--line)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <strong style={{ fontSize: 13 }}>{binding.citationId}</strong>
+                  <span style={fieldLabel}>VERSION {binding.documentVersionId} · SECTION {binding.sectionOrdinal + 1}</span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginTop: 5 }}>{binding.documentTitle || binding.originalFilename}</div>
+                <div style={{ ...fieldLabel, marginTop: 4 }}>{binding.headingPath.join(" / ") || binding.sectionTitle}</div>
+                <div style={{ fontSize: 12.5, color: "var(--ink2)", lineHeight: 1.6, fontStyle: "italic", whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginTop: 7 }}>&ldquo;{binding.excerpt}&rdquo;</div>
+              </div>
+            ))}
+          </div>
+
+          {sourceAudit?.corpusMode === "tenant" && (
+            <div style={{ marginTop: 28 }}>
+              <SectionTitle>SOURCE AUDIT &amp; PROVENANCE</SectionTitle>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontFamily: mono, fontSize: 10, color: "var(--sub)", lineHeight: 1.5 }}>
+                <div>CORPUS {sourceAudit.corpusMode.toUpperCase()}</div>
+                <div>STATUS {sourceAudit.generationStatus.toUpperCase()}</div>
+                <div>RETRIEVAL {sourceAudit.retrievalEngineVersion ?? "—"}</div>
+                <div>GENERATION {sourceAudit.executionMode ?? "—"}</div>
+                <div>{sourceAudit.sourceVersionCount} FROZEN VERSION{sourceAudit.sourceVersionCount === 1 ? "" : "S"}</div>
+                <div>{sourceAudit.evidenceSectionCount} SELECTED EVIDENCE SECTIONS</div>
+              </div>
+              {sourceAudit.corpusSnapshotDigest && (
+                <div style={{ ...fieldLabel, overflowWrap: "anywhere", marginTop: 10 }}>SNAPSHOT {sourceAudit.corpusSnapshotDigest}</div>
+              )}
+            </div>
+          )}
+          <PageFooter report={report} section="SOURCE APPENDIX" />
+        </div>
+      </section>
+    </>
+  );
+}
 
 const RISK_COLS = "64px 1.1fr 1.3fr 62px 1.3fr 72px";
 
@@ -479,27 +551,6 @@ function InsightCard({ title, children }: { title: string; children: React.React
     <div className="avoid-break" style={{ display: "flex", flexDirection: "column", border: "1px solid var(--line2)", borderRadius: 10, padding: "20px 22px" }}>
       <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 18 }}>{title}</div>
       {children}
-    </div>
-  );
-}
-
-function StatCard({ title, big, pct, sub }: { title: string; big: string; pct: number; sub: string }) {
-  return (
-    <div className="avoid-break" style={{ display: "flex", flexDirection: "column", border: "1px solid var(--line2)", borderRadius: 10, padding: "20px 22px" }}>
-      <div style={{ fontFamily: mono, fontSize: 10, color: "var(--sub)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 14 }}>{title}</div>
-      <div style={{ fontSize: 34, fontWeight: 700, color: "var(--accent)", letterSpacing: "-.02em" }}>{big}</div>
-      <div style={{ marginTop: 14 }}>
-        <Bar pct={pct} />
-      </div>
-      <div style={{ fontSize: 12, color: "var(--sub)", marginTop: "auto", paddingTop: 12 }}>{sub}</div>
-    </div>
-  );
-}
-
-function Bar({ pct }: { pct: number }) {
-  return (
-    <div style={{ height: 7, background: "var(--shell)", borderRadius: 4, overflow: "hidden" }}>
-      <div style={{ width: `${pct}%`, height: "100%", background: "var(--accent)", borderRadius: 4 }} />
     </div>
   );
 }

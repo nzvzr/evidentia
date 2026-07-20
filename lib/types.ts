@@ -185,6 +185,18 @@ export interface ReportSourceAudit {
   evidenceBindings: ReportEvidenceSource[];
 }
 
+/** Tenant-scoped M5a claim audit. Kept outside EvidentiaReport compatibility JSON. */
+export interface ReportClaimAudit {
+  claimEngineEnabled: boolean;
+  candidates: Array<{
+    candidateId: string;
+    appearedInFinal: boolean;
+    decision: null | {
+      status: "accepted" | "rejected" | "insufficient_evidence" | string;
+    };
+  }>;
+}
+
 /** Tenant-private feedback projection. Kept outside EvidentiaReport. */
 export type ReportFeedbackVerdict = "correct_useful" | "partially_correct" | "incorrect";
 export type ItemFeedbackVerdict = "accepted" | "rejected" | "edited" | "insufficient_evidence";

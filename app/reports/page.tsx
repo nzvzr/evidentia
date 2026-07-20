@@ -4,8 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { REPORT_CATEGORIES } from "@/lib/scenarios";
-import { fetchBackendReports } from "@/lib/reportsApi";
-import type { EvidentiaReport } from "@/lib/types";
+import { fetchBackendReports, fetchReportClaimAudit } from "@/lib/reportsApi";
+import { hasZeroAcceptedAnalyticalOutput } from "@/lib/reportPresentation";
+import type { EvidentiaReport, ReportClaimAudit } from "@/lib/types";
 
 const mono = "var(--font-plex-mono), monospace";
 
@@ -16,7 +17,7 @@ interface Card {
   persona: string;
   market: string;
   generatedDate: string;
-  confidence: number;
+  confidence: string;
   documents: number;
   citations: number;
   risks: number;
@@ -24,11 +25,13 @@ interface Card {
   category: string;
 }
 
-function toCard(r: EvidentiaReport): Card {
+function toCard(r: EvidentiaReport, audit: ReportClaimAudit | null | undefined): Card {
   const d = new Date(r.generatedAt);
   const date = Number.isNaN(d.getTime())
     ? "—"
     : d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric", timeZone: "UTC" });
+  const auditUnresolved = audit === undefined;
+  const zeroClaims = audit !== null && audit !== undefined && hasZeroAcceptedAnalyticalOutput(r, audit);
   return {
     id: r.id,
     title: `${r.persona} · ${r.market}`,
@@ -36,11 +39,11 @@ function toCard(r: EvidentiaReport): Card {
     persona: r.persona,
     market: r.market,
     generatedDate: date,
-    confidence: r.confidence,
+    confidence: auditUnresolved ? "—" : zeroClaims ? "N/A" : `${r.confidence}%`,
     documents: r.metrics.documentsAnalyzed,
     citations: r.metrics.citationsUsed,
     risks: r.metrics.risksFlagged,
-    status: "Ready",
+    status: zeroClaims ? "No supported claims" : "Ready",
     category: r.category,
   };
 }
@@ -48,6 +51,7 @@ function toCard(r: EvidentiaReport): Card {
 export default function ReportsPage() {
   const router = useRouter();
   const [backendReports, setBackendReports] = useState<EvidentiaReport[]>([]);
+  const [claimAudits, setClaimAudits] = useState<Record<string, ReportClaimAudit | null>>({});
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("All");
 
@@ -55,8 +59,11 @@ export default function ReportsPage() {
     // The backend is the ONLY source of truth for a signed-in user's reports.
     // They are never mirrored into localStorage, so there is nothing to merge.
     let cancelled = false;
-    fetchBackendReports().then((reports) => {
-      if (!cancelled) setBackendReports(reports);
+    fetchBackendReports().then(async (reports) => {
+      if (cancelled) return;
+      setBackendReports(reports);
+      const audits = await Promise.all(reports.map(async (report) => [report.id, await fetchReportClaimAudit(report.id)] as const));
+      if (!cancelled) setClaimAudits(Object.fromEntries(audits));
     });
     return () => {
       cancelled = true;
@@ -64,8 +71,8 @@ export default function ReportsPage() {
   }, []);
 
   const cards: Card[] = useMemo(() => {
-    return backendReports.map(toCard);
-  }, [backendReports]);
+    return backendReports.map((report) => toCard(report, claimAudits[report.id]));
+  }, [backendReports, claimAudits]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -153,7 +160,7 @@ export default function ReportsPage() {
                   <Meta label="PERSONA" value={rec.persona} />
                   <Meta label="MARKET" value={rec.market} />
                   <Meta label="GENERATED" value={rec.generatedDate} monoValue />
-                  <Meta label="CONFIDENCE" value={`${rec.confidence}%`} accent />
+                  <Meta label="BASELINE SCORE" value={rec.confidence} />
                 </div>
 
                 <div style={{ display: "flex", gap: 14, marginTop: 14, fontFamily: mono, fontSize: 11.5, color: "var(--sub)" }}>
