@@ -1,7 +1,4 @@
-/**
- * UI-only constants for the report/playbook libraries. Demo report data now
- * comes from the multi-agent pipeline via data/scenarios.ts + data/demoReports.ts.
- */
+/** UI-only categories and templates for persisted tenant reports. */
 
 export const REPORT_CATEGORIES = [
   "All",

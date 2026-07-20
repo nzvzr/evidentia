@@ -12,10 +12,6 @@ export const dynamic = "force-dynamic";
  * (This endpoint used to report `mode: "deterministic-fallback"`, describing an
  * architecture that no longer exists.)
  *
- * The only anonymous path is `/api/demo/generate-workflow`, which runs the public
- * sample pipeline in this process and persists nothing, so it stays available even
- * when the backend is down. That is reported separately as `demoAvailable`.
- *
  * Returns 503 when the backend is required but unreachable, so an orchestrator
  * sees an unhealthy instance rather than a green one that cannot serve the product.
  */
@@ -25,8 +21,6 @@ export async function GET() {
   const base = {
     service: "evidentia-frontend",
     backendConfigured: Boolean(backendUrl),
-    /** The public sample pipeline is in-process; it never needs the backend. */
-    demoAvailable: true,
     time: new Date().toISOString(),
   };
 
