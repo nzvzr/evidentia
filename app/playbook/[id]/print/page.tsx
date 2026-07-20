@@ -3,7 +3,6 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Logo from "@/components/Logo";
-import { generateReportForId } from "@/data/demoReports";
 import { fetchBackendReport } from "@/lib/reportsApi";
 import type { EvidentiaReport, RiskItem } from "@/lib/types";
 

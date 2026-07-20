@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { DEMO_REPORTS } from "@/data/demoReports";
 import { REPORT_CATEGORIES } from "@/lib/scenarios";
 import { fetchBackendReports } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
@@ -23,10 +22,9 @@ interface Card {
   risks: number;
   status: string;
   category: string;
-  isLocal: boolean;
 }
 
-function toCard(r: EvidentiaReport, isLocal: boolean): Card {
+function toCard(r: EvidentiaReport): Card {
   const d = new Date(r.generatedAt);
   const date = Number.isNaN(d.getTime())
     ? "—"
@@ -42,9 +40,8 @@ function toCard(r: EvidentiaReport, isLocal: boolean): Card {
     documents: r.metrics.documentsAnalyzed,
     citations: r.metrics.citationsUsed,
     risks: r.metrics.risksFlagged,
-    status: isLocal ? "This session" : "Ready",
+    status: "Ready",
     category: r.category,
-    isLocal,
   };
 }
 
@@ -67,19 +64,7 @@ export default function ReportsPage() {
   }, []);
 
   const cards: Card[] = useMemo(() => {
-    const seen = new Set<string>();
-    const out: Card[] = [];
-    for (const r of backendReports) {
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      out.push(toCard(r, true));
-    }
-    for (const r of DEMO_REPORTS) {
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      out.push(toCard(r, false));
-    }
-    return out;
+    return backendReports.map(toCard);
   }, [backendReports]);
 
   const filtered = useMemo(() => {
@@ -148,7 +133,9 @@ export default function ReportsPage() {
 
         {filtered.length === 0 ? (
           <div style={{ padding: "48px 0", textAlign: "center", color: "var(--sub)", fontSize: 14 }}>
-            No reports match your search.
+            {backendReports.length === 0
+              ? "No persisted reports yet. Create a workspace to generate one."
+              : "No reports match your search."}
           </div>
         ) : (
           <div style={cardGrid} className="ev-rep-grid">
@@ -159,7 +146,7 @@ export default function ReportsPage() {
                     <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-.01em" }}>{rec.title}</div>
                     <div style={{ fontSize: 12.5, color: "var(--sub)", marginTop: 4 }}>{rec.company}</div>
                   </div>
-                  <StatusPill label={rec.status} accent={rec.isLocal} />
+                  <StatusPill label={rec.status} accent />
                 </div>
 
                 <div style={metaGrid}>

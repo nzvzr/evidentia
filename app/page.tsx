@@ -55,14 +55,10 @@ const SECURITY_CARDS = [
 ];
 
 const DOC_TYPES = [
-  { name: "Security & Compliance Whitepaper", meta: "PDF · 48p" },
-  { name: "Platform API Reference", meta: "HTML · 320 endpoints" },
-  { name: "SLA & Uptime Commitment", meta: "PDF · 12p" },
-  { name: "Deployment & Migration Guide", meta: "PDF · 86p" },
-  { name: "Data Residency Policy", meta: "PDF · 24p" },
-  { name: "Incident Response Runbook", meta: "MD · 31p" },
-  { name: "Pricing & Packaging Sheet", meta: "XLSX · 5 tabs" },
-  { name: "Onboarding Handbook", meta: "PDF · 40p" },
+  { name: "Policies and standards", meta: "MARKDOWN OR TEXT" },
+  { name: "Operating procedures", meta: "MARKDOWN OR TEXT" },
+  { name: "Technical reference notes", meta: "MARKDOWN OR TEXT" },
+  { name: "Enablement guides", meta: "MARKDOWN OR TEXT" },
 ];
 
 const PRICING = [
@@ -268,7 +264,7 @@ export default function LandingPage() {
           <div style={eyebrow}>Docs</div>
           <h2 style={h2}>Supported documentation sources</h2>
           <p style={{ ...bodyText, maxWidth: "56ch" }}>
-            The demo workspace analyzes a representative enterprise-cloud corpus. Evidentia ingests PDFs, Markdown, HTML references, and spreadsheets.
+            Upload your organization&apos;s Markdown and plain-text documentation. Evidentia finalizes stable citation identities before a document can be used for generation.
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginTop: 36 }} className="ev-doc-grid">
             {DOC_TYPES.map((d) => (

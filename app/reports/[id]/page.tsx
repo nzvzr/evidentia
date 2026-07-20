@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import DownloadDocxButton from "@/components/DownloadDocxButton";
 import { useSession } from "@/components/SessionProvider";
-import { generateReportForId } from "@/data/demoReports";
 import {
   fetchBackendReport,
   fetchReportFeedback,
@@ -208,11 +207,10 @@ export default function ReportDetailPage() {
     {
       k: "Documents",
       v: String(metrics.documentsAnalyzed),
-      s: sourceAudit
-        ? sourceAudit.corpusMode === "tenant"
+      s:
+        sourceAudit?.corpusMode === "tenant"
           ? `${sourceAudit.sourceVersionCount} frozen versions`
-          : "of 8 sample documents"
-        : "corpus unavailable",
+          : "corpus unavailable",
       accent: false,
     },
     { k: "Passages indexed", v: metrics.passagesIndexed.toLocaleString(), s: "semantic chunks", accent: false },
@@ -268,11 +266,7 @@ export default function ReportDetailPage() {
                 {modeLabel}
               </span>
               <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".06em", padding: "4px 9px", borderRadius: 5, color: "var(--ink2)", background: "var(--shell)", border: "1px solid var(--line2)" }}>
-                {sourceAudit
-                  ? sourceAudit.corpusMode === "tenant"
-                    ? "TENANT CORPUS"
-                    : "SAMPLE CORPUS"
-                  : "CORPUS UNAVAILABLE"}
+                {sourceAudit?.corpusMode === "tenant" ? "TENANT CORPUS" : "CORPUS UNAVAILABLE"}
               </span>
               {personaBrief.isCustom && (
                 <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: ".06em", padding: "4px 9px", borderRadius: 5, color: "var(--ink2)", background: "var(--shell)", border: "1px solid var(--line2)" }}>
@@ -461,7 +455,7 @@ export default function ReportDetailPage() {
               )}
             </Card>
 
-            {sourceAudit && (
+            {sourceAudit?.corpusMode === "tenant" && (
               <Card pad="24px 24px">
                 <SectionLabel>SOURCE AUDIT</SectionLabel>
                 <div style={{ display: "grid", gap: 8, fontFamily: mono, fontSize: 10.5, color: "var(--sub)", lineHeight: 1.5 }}>

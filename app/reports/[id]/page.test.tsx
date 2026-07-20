@@ -2,8 +2,7 @@
 
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { generateReportForId } from "@/data/demoReports";
-import type { ReportSourceAudit } from "@/lib/types";
+import type { EvidentiaReport, ReportSourceAudit } from "@/lib/types";
 import ReportDetailPage from "./page";
 
 const mocks = vi.hoisted(() => ({
@@ -50,6 +49,70 @@ async function flush() {
   });
 }
 
+function tenantReport(id = "report-1"): EvidentiaReport {
+  return {
+    id,
+    company: "Tenant Company",
+    market: "EMEA",
+    persona: "Solutions Architect",
+    category: "Architecture",
+    generatedAt: "2026-07-20T10:00:00Z",
+    confidence: 91,
+    summary: "A grounded tenant summary.",
+    topFinding: "Review the documented access policy.",
+    generationMode: "deterministic",
+    llmProvider: "none",
+    agentSteps: [{ agent: "Pipeline", status: "complete", detail: "Completed", duration: "1s" }],
+    personaBrief: {
+      title: "Solutions Architect",
+      description: "Validates documented constraints.",
+      goals: ["Validate design"],
+      priorities: ["Evidence"],
+      relevantTopics: ["Access"],
+      riskFocus: ["Control gaps"],
+      outputStyle: "Cited",
+      isCustom: false,
+    },
+    workflowSteps: [{
+      step: 1,
+      title: "Review policy",
+      description: "Read the tenant policy.",
+      whyItMatters: "Confirms the constraint.",
+      expectedOutput: "Validated decision",
+      evidenceCode: "TENANT-1",
+    }],
+    risks: [{
+      severity: "Medium",
+      title: "Policy gap",
+      description: "A documented gap.",
+      businessImpact: "Review required.",
+      evidenceCode: "TENANT-1",
+      recommendedFix: "Update the policy.",
+      owner: "Platform",
+    }],
+    citations: [{
+      id: "TENANT-1",
+      source: "Tenant policy",
+      section: "Access",
+      excerpt: "Access is reviewed quarterly.",
+      whyItMatters: "Binds the recommendation.",
+    }],
+    metrics: {
+      documentsAnalyzed: 1,
+      passagesIndexed: 1,
+      citationsUsed: 1,
+      risksFlagged: 1,
+      confidence: 91,
+      personaRelevanceScore: 90,
+      workflowCompleteness: 100,
+      citationCoverage: 100,
+      complianceSensitivity: "Moderate",
+      documentRelevance: [{ document: "Tenant policy", score: 100 }],
+    },
+    suggestedActions: [{ title: "Update policy", detail: "Close the documented gap." }],
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -66,7 +129,7 @@ beforeEach(() => {
 
 describe("ReportDetailPage source truth", () => {
   it("renders tenant citation bindings and deterministic audit metadata", async () => {
-    const report = { ...generateReportForId("report-1"), generationMode: "deterministic" as const };
+    const report = tenantReport();
     const citation = report.citations[0];
     const audit: ReportSourceAudit = {
       corpusMode: "tenant",
@@ -119,8 +182,8 @@ describe("ReportDetailPage source truth", () => {
     expect(screen.getByText(citation.excerpt, { exact: false })).toBeTruthy();
   });
 
-  it("keeps an old migrated demo report readable and labels it as sample corpus", async () => {
-    mocks.fetchReport.mockResolvedValue(generateReportForId("legacy-report"));
+  it("does not present non-tenant audit metadata as organization evidence", async () => {
+    mocks.fetchReport.mockResolvedValue(tenantReport("legacy-report"));
     mocks.fetchAudit.mockResolvedValue({
       corpusMode: "demo",
       corpusSnapshotDigest: null,
@@ -139,24 +202,23 @@ describe("ReportDetailPage source truth", () => {
     render(<ReportDetailPage />);
     await flush();
 
-    expect(screen.getByText("SAMPLE CORPUS")).toBeTruthy();
-    expect(screen.getByText("SOURCE AUDIT")).toBeTruthy();
+    expect(screen.getByText("CORPUS UNAVAILABLE")).toBeTruthy();
+    expect(screen.queryByText("SOURCE AUDIT")).toBeNull();
     expect(screen.queryByText(/VERSION version-exact/)).toBeNull();
   });
 
-  it("never guesses sample corpus when audit metadata is unavailable", async () => {
-    mocks.fetchReport.mockResolvedValue(generateReportForId("unknown-corpus"));
+  it("shows corpus unavailable when audit metadata is unavailable", async () => {
+    mocks.fetchReport.mockResolvedValue(tenantReport("unknown-corpus"));
     mocks.fetchAudit.mockResolvedValue(null);
 
     render(<ReportDetailPage />);
     await flush();
 
     expect(screen.getByText("CORPUS UNAVAILABLE")).toBeTruthy();
-    expect(screen.queryByText("SAMPLE CORPUS")).toBeNull();
   });
 
   it("clears tenant feedback state when the account scope changes", async () => {
-    const report = generateReportForId("report-1");
+    const report = tenantReport();
     mocks.fetchReport.mockResolvedValue(report);
     mocks.fetchAudit.mockResolvedValue(null);
     mocks.fetchFeedback.mockResolvedValueOnce({

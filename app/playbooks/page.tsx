@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { PLAYBOOK_TEMPLATES } from "@/lib/scenarios";
-import { DEMO_REPORTS } from "@/data/demoReports";
 import { fetchBackendReports } from "@/lib/reportsApi";
 import type { EvidentiaReport } from "@/lib/types";
 
@@ -20,10 +19,9 @@ interface PlaybookCard {
   confidence: number;
   risks: number;
   citations: number;
-  isLocal: boolean;
 }
 
-function toCard(r: EvidentiaReport, isLocal: boolean): PlaybookCard {
+function toCard(r: EvidentiaReport): PlaybookCard {
   const d = new Date(r.generatedAt);
   const date = Number.isNaN(d.getTime())
     ? "—"
@@ -38,7 +36,6 @@ function toCard(r: EvidentiaReport, isLocal: boolean): PlaybookCard {
     confidence: r.confidence,
     risks: r.metrics.risksFlagged,
     citations: r.metrics.citationsUsed,
-    isLocal,
   };
 }
 
@@ -65,13 +62,7 @@ export default function PlaybooksPage() {
   const openReport = (rec: PlaybookCard) => router.push(`/reports/${rec.id}`);
   const openPrint = (rec: PlaybookCard) => window.open(`/playbook/${rec.id}/print`, "_blank");
 
-  const recents: PlaybookCard[] = useMemo(() => {
-    const localCards = stored.map((r) => toCard(r, true));
-    const localIds = new Set(localCards.map((c) => c.id));
-    const demoCards = DEMO_REPORTS.filter((r) => !localIds.has(r.id)).map((r) => toCard(r, false));
-    return [...localCards, ...demoCards];
-  }, [stored]);
-  const hasLocal = hydrated && stored.length > 0;
+  const recents: PlaybookCard[] = useMemo(() => stored.map(toCard), [stored]);
 
   return (
     <AppShell active="playbooks">
@@ -95,20 +86,23 @@ export default function PlaybooksPage() {
           </p>
         </div>
 
-        {/* demo-mode note */}
+        {/* Tenant persistence note */}
         <div style={noteBox}>
           <span style={{ fontFamily: mono, fontSize: 10.5, color: "var(--accent)", letterSpacing: ".08em", fontWeight: 600 }}>
-            DEMO MODE
+            TENANT LIBRARY
           </span>
           <span style={{ fontSize: 13, color: "var(--ink2)" }}>
-            {hasLocal
-              ? "Your generated reports are stored in your organization's workspace."
-              : "Showing sample playbooks — run a workspace to generate your own."}
+            Generated reports are loaded from your organization&apos;s persisted workspace.
           </span>
         </div>
 
         {/* A. Recent playbooks */}
         <SectionLabel>RECENT PLAYBOOKS</SectionLabel>
+        {hydrated && recents.length === 0 && (
+          <div style={{ padding: "32px", textAlign: "center", color: "var(--sub)", border: "1px solid var(--line)", borderRadius: 12, background: "var(--panel)", marginBottom: 16 }}>
+            No persisted playbooks yet. Generate a report from your tenant documents first.
+          </div>
+        )}
         <div style={cardGrid} className="ev-pb-grid">
           {recents.map((rec) => {
             return (
@@ -118,7 +112,7 @@ export default function PlaybooksPage() {
                     <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-.01em" }}>{rec.title}</div>
                     <div style={{ fontSize: 12.5, color: "var(--sub)", marginTop: 4 }}>{rec.company}</div>
                   </div>
-                  <StatusPill label={rec.isLocal ? "This session" : "Ready"} accent={rec.isLocal} />
+                  <StatusPill label="Ready" accent />
                 </div>
 
                 <div style={metaGrid}>

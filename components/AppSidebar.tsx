@@ -1,8 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import Logo from "./Logo";
 import { useSession } from "./SessionProvider";
+import { fetchBackendReports } from "@/lib/reportsApi";
+import type { EvidentiaReport } from "@/lib/types";
 
 export type SidebarKey = "workspace" | "reports" | "playbooks" | "documents";
 
@@ -49,12 +52,6 @@ const NAV: { key: SidebarKey; label: string; letter: string; href: string }[] = 
   { key: "documents", label: "Documents", letter: "D", href: "/documents" },
 ];
 
-const RECENTS: { label: string; href: string }[] = [
-  { label: "Support Agent · EMEA", href: "/reports/support-emea" },
-  { label: "Sales Engineer Playbook", href: "/reports/sales-finserv" },
-  { label: "Solutions Architect Report", href: "/reports/architect-govcloud" },
-];
-
 export default function AppSidebar({
   theme = "light",
   active = "workspace",
@@ -62,6 +59,24 @@ export default function AppSidebar({
 }: AppSidebarProps) {
   const router = useRouter();
   const pal = theme === "dark" ? DARK : LIGHT;
+  const { status, activeCompany } = useSession();
+  const reportScope = status === "authenticated" ? activeCompany?.id ?? null : null;
+  const [recentState, setRecentState] = useState<{
+    scope: string | null;
+    reports: EvidentiaReport[];
+  }>({ scope: null, reports: [] });
+  const recentReports = recentState.scope === reportScope ? recentState.reports : [];
+
+  useEffect(() => {
+    if (!reportScope) return;
+    let cancelled = false;
+    void fetchBackendReports().then((reports) => {
+      if (!cancelled) setRecentState({ scope: reportScope, reports: reports.slice(0, 3) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reportScope]);
 
   return (
     <aside
@@ -174,10 +189,10 @@ export default function AppSidebar({
 
       <div style={sectionLabel(pal)}>RECENT</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-        {RECENTS.map((r) => (
+        {recentReports.map((report) => (
           <button
-            key={r.href}
-            onClick={() => router.push(r.href)}
+            key={report.id}
+            onClick={() => router.push(`/reports/${report.id}`)}
             style={{
               display: "flex",
               alignItems: "center",
@@ -209,10 +224,15 @@ export default function AppSidebar({
                 textOverflow: "ellipsis",
               }}
             >
-              {r.label}
+              {report.persona} · {report.market}
             </span>
           </button>
         ))}
+        {status === "authenticated" && recentReports.length === 0 && (
+          <div style={{ padding: "7px 10px", fontSize: 12, color: pal.sub }}>
+            No reports yet
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, minHeight: 20 }} />
